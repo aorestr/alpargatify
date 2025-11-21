@@ -49,8 +49,7 @@ import unicodedata
 from functools import cached_property
 from pathlib import Path
 
-from mutagen import File as MutagenFile
-
+from mutagen import File as MutagenFile, FileType
 
 # Global variables
 AUDIO_EXTS: t.Final[tuple] = ('.m4a', '.mp4', '.mp3', '.flac', '.wav', '.aac', '.ogg', '.opus')
@@ -204,7 +203,6 @@ class Helper(object):
         if dry_run:
             logger.info(f"DRY RUN: would create directory: {path}")
             return
-
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -226,6 +224,13 @@ class FileNormalizer(object):
         pass
 
     @cached_property
+    def mutagen(self) -> FileType:
+        mut = MutagenFile(str(self._path), easy=False)
+        if mut is not None and mut.tags:
+            logger.debug(f"Tags for file '{self._path}' found through mutagen: {mut}")
+        return mut
+
+    @cached_property
     def tags(self) -> dict[str, t.Any]:
         return self._read_tags()
 
@@ -239,13 +244,9 @@ class FileNormalizer(object):
         :return: tag value or None
         """
 
-        mut = MutagenFile(str(self._path), easy=False)
-        if mut is None:
+        if self.mutagen is None or not self.mutagen.tags:
             return None
-        tags = mut.tags
-        logger.debug(f"Tags for file '{self._path}' found through mutagen: {tags}")
-        if not tags:
-            return None
+        tags = self.mutagen.tags
 
         # For MP4 files mutagen uses keys like '\xa9nam', '\xa9ART', '\xa9day'
         # For ID3 tags keys are objects (FrameName) - but tags.get('TPE1') works.
@@ -512,7 +513,10 @@ class AlbumNormalizer(object):
             if target_path.exists() and SKIP_EXISTING:
                 logger.info(f"Skipping move because target exists and SKIP_EXISTING=yes: {target_path}")
                 for old_file in self.file_songs:
-                    if old_file.tags["title"] == file.tags["title"] and old_file.tags["track"] == file.tags["track"]:
+                    if (
+                        old_file.tags["title"] == file.tags["title"] and old_file.tags["track"] == file.tags["track"]
+                        and old_file.path.parent != file.path.parent
+                    ):
                         logger.debug(f"Removing duplicate file: {old_file.path}")
                         os.remove(old_file.path)
                         break
