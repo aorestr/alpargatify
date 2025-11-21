@@ -95,7 +95,31 @@ SKIP_EXISTING="$(normalize_bool "$SKIP_EXISTING")"
 DRY_RUN="$(normalize_bool "$DRY_RUN")"
 VERBOSE="$(normalize_bool "$VERBOSE")"
 
-# sanity checks
+# --- PRECHECKS: macOS and required commands ---
+# Detect macOS (Darwin)
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "Error: afconvert is macOS-only. This script requires macOS (Darwin)." >&2
+  exit 5
+# Ensure afconvert exists
+elif ! command -v afconvert >/dev/null 2>&1; then
+  echo "Error: afconvert not found in PATH. Ensure you're on macOS and Xcode (or Command Line Tools) is installed." >&2
+  exit 6
+fi
+
+# Optional tools for metadata (we'll continue if missing but warn)
+MISSING_META_TOOLS=""
+if ! command -v metaflac >/dev/null 2>&1; then
+  MISSING_META_TOOLS="$MISSING_META_TOOLS metaflac"
+fi
+if ! command -v AtomicParsley >/dev/null 2>&1; then
+  MISSING_META_TOOLS="$MISSING_META_TOOLS AtomicParsley"
+fi
+if [ -n "$MISSING_META_TOOLS" ]; then
+  echo "Warning: metadata copying will be skipped or limited because the following tools are missing:$MISSING_META_TOOLS" >&2
+fi
+# --- end prechecks ---
+
+# Sanity checks
 if [ ! -d "$SRC" ]; then
   echo "Error: source directory does not exist: $SRC" >&2
   exit 3
@@ -169,30 +193,37 @@ while IFS= read -r -d '' srcfile; do
   echo "  dest:   $destfile"
 
   if [ "$DRY_RUN" = "yes" ]; then
-    # print safe, human-readable command
+    # Print safe, human-readable command
     printf '  -> DRY RUN: afconvert'
     for tok in "${AF_ARGS[@]}"; do printf ' %s' "$tok"; done
     printf ' %q %q\n' "$srcfile" "$destfile"
     continue
   fi
 
-  # assemble command array and run
+  # Assemble command array and run
   cmd=(afconvert)
   if [ "${#AF_ARGS[@]}" -gt 0 ]; then
     cmd+=( "${AF_ARGS[@]}" )
   fi
   cmd+=( "$srcfile" "$destfile" )
 
+  # Create one temporary working directory for metadata extraction and ensure cleanup
+  TMPD=""
+  if ! TMPD="$(mktemp -d 2>/dev/null)"; then
+    echo "Warning: could not create global temp dir; metadata operations may fail." >&2
+  else
+    # cleanup on exit/interrupt
+    trap 'rm -rf "$TMPD"' EXIT INT TERM
+  fi
+
   vprint "Running: ${cmd[*]}"
   if "${cmd[@]}"; then
-    # --- METADATA PRESERVATION (added) ---
-    # If metaflac + AtomicParsley are available, export Vorbis comments + embedded picture
-    # from the source FLAC and apply them to the destination M4A. Errors here are
-    # non-fatal and will print warnings only.
+    # --- METADATA PRESERVATION ---
+    # Export Vorbis comments + embedded picture from the source FLAC and apply them to the
+    # destination M4A. Errors here are non-fatal and will print warnings only.
     if command -v metaflac >/dev/null 2>&1 && command -v AtomicParsley >/dev/null 2>&1; then
-      tmpd=""
-      if tmpd="$(mktemp -d 2>/dev/null)"; then
-        metafile="$tmpd/meta.txt"
+      if [ -d "$TMPD" ]; then
+        metafile="$TMPD/meta.txt"
         # try to export Vorbis comments; metaflac prints TAG=VALUE lines
         if metaflac --export-tags-to="$metafile" "$srcfile" 2>/dev/null; then
           ap_args=()
@@ -218,7 +249,7 @@ while IFS= read -r -d '' srcfile; do
           done < "$metafile"
 
           # try to export embedded picture (cover art). metaflac exits non-zero if no picture.
-          picfile="$tmpd/cover"
+          picfile="$TMPD/cover"
           if metaflac --export-picture-to="$picfile" "$srcfile" 2>/dev/null; then
             # AtomicParsley expects a file with extension; try to detect image type
             # by file command if available, otherwise fallback to .jpg
@@ -247,7 +278,6 @@ while IFS= read -r -d '' srcfile; do
             fi
           fi
         fi
-        rm -rf "$tmpd"
       fi
     else
       vprint "metaflac or AtomicParsley not available; skipping metadata copy"
