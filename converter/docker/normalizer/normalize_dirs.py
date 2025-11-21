@@ -374,12 +374,13 @@ class AlbumNormalizer(object):
         discs_present = sorted({d for d, _, _ in [v for v in disc_map.values()]})
         multi_disc = len(discs_present) > 1
 
-        # For multi-disc: create per-disc subdir
+        result = []
         for file_path, (disc, track, tags) in disc_map.items():
             track_num = padded(track, 2)
             filename = f"{track_num}. {tags.get('artist') or artist} - {tags.get('title') or file_path.stem}{file_path.suffix}"
-            # sanitize filename
+            # Sanitize filename
             filename = sanitize_filename(filename)
+            # For multi-disc: create per-disc subdir
             if multi_disc:
                 filename = f"{disc}/{discs_present} {filename}"
                 target_dir = f"{renamed_album_dir}/Disc {disc}"
@@ -396,11 +397,11 @@ class AlbumNormalizer(object):
                 continue
             ensure_dir(target_dir, dry_run=dry_run)
             try:
-                return move_or_rename(file_path, target_path, dry_run=dry_run)
+                result.append(move_or_rename(file_path, target_path, dry_run=dry_run))
             except Exception as e:
                 logger.error(f"Failed to move {file_path} -> {target_path}: {e}")
-                return False
-
+                result.append(False)
+        return any(result)
 
 class Normalizer(object):
 
