@@ -146,6 +146,47 @@ class FileNormalizer(object):
         return self._read_tags()
 
     ### METHODS
+    def get_tag_value(self, keys: t.Tuple[str]) -> t.Optional[str]:
+        """
+        Try a few tag keys from mutagen tags, return the first non-empty.
+        Keys should be the convenient canonical names we want to probe for.
+        This function attempts several common tag variants for different formats.
+        :param keys: list of tag keys.
+        :return: tag value or None
+        """
+
+        mut = MutagenFile(str(self._path), easy=False)
+        if mut is None:
+            return None
+        tags = mut.tags
+        logger.debug(f"Tags for file {self._path}: {tags}")
+        if not tags:
+            return None
+
+        # For MP4 files mutagen uses keys like '\xa9nam', '\xa9ART', '\xa9day'
+        # For ID3 tags keys are objects (FrameName) - but tags.get('TPE1') works.
+        # Mutagen also supports tags.get('artist') for some formats.
+
+        # Try canonical keys first
+        for k in keys:
+            # direct key
+            if k in tags:
+                return Helper.safe_text(tags.get(k))
+            # try lowercase
+            elif k.lower() in tags:
+                return Helper.safe_text(tags.get(k.lower()))
+        # try a more general search: look for keys that contain the canonical key
+        for k in keys:
+            for tag_key in tags.keys():
+                try:
+                    if isinstance(tag_key, str) and k.lower() in tag_key.lower():
+                        v = tags.get(tag_key)
+                        if v:
+                            return Helper.safe_text(v)
+                except Exception:
+                    continue
+        return None
+
     def _read_tags(self) -> dict[str, t.Any]:
         """Return a dict with common tag fields for this file.
 
@@ -163,12 +204,8 @@ class FileNormalizer(object):
         }
         try:
 
-            m = MutagenFile(str(self._path), easy=False)
-            if m is None:
-                return data
-
             # Common lookup
-            tags = {key: get_tag_value(m, keys) for key, keys in TAG_KEYS.items()}
+            tags = {key: self.get_tag_value(keys) for key, keys in TAG_KEYS.items()}
             artist = tags['artist']
             albumartist = tags['albumartist']
             album = tags['album']
@@ -359,9 +396,10 @@ class AlbumNormalizer(object):
                 continue
             ensure_dir(target_dir, dry_run=dry_run)
             try:
-                moved = move_or_rename(file_path, target_path, dry_run=dry_run)
+                return move_or_rename(file_path, target_path, dry_run=dry_run)
             except Exception as e:
                 logger.error(f"Failed to move {file_path} -> {target_path}: {e}")
+                return False
 
 
 class Normalizer(object):
@@ -423,45 +461,6 @@ class Normalizer(object):
                 logger.exception(f"Error processing album {ad.path}: {e}")
 
 
-def get_tag_value(mut, keys: t.Tuple[str]) -> t.Optional[str]:
-    """Try a few tag keys from mutagen tags, return the first non-empty.
-
-    Keys should be the convenient canonical names we want to probe for.
-    This function attempts several common tag variants for different formats.
-    """
-    if mut is None:
-        return None
-    tags = mut.tags
-    
-    logger.debug(f"Tags for file: {tags}")
-    if not tags:
-        return None
-
-    # For MP4 files mutagen uses keys like '\xa9nam', '\xa9ART', '\xa9day'
-    # For ID3 tags keys are objects (FrameName) - but tags.get('TPE1') works.
-    # Mutagen also supports tags.get('artist') for some formats.
-
-    # Try canonical keys first
-    for k in keys:
-        # direct key
-        if k in tags:
-            return Helper.safe_text(tags.get(k))
-        # try lowercase
-        if k.lower() in tags:
-            return Helper.safe_text(tags.get(k.lower()))
-    # try a more general search: look for keys that contain the canonical key
-    for k in keys:
-        for tkey in tags.keys():
-            try:
-                if isinstance(tkey, str) and k.lower() in tkey.lower():
-                    v = tags.get(tkey)
-                    if v:
-                        return Helper.safe_text(v)
-            except Exception:
-                continue
-    return None
-
-
 def padded(n: int, width: int = 2) -> str:
     return str(n).zfill(width)
 
@@ -482,24 +481,6 @@ def build_album_dir_name(artist: str, year: t.Optional[str], album: str, release
         if release_type.strip().lower() not in ('lp', 'long play'):
             parts.append(f" [{release_type}]")
     return ''.join(parts)
-
-
-def make_unique_path_if_needed(path: Path) -> Path:
-    """If path exists, try to make a unique name by appending ' (1)', ' (2)', ...
-
-    This is used only for safety when we need a non-conflicting name.
-    """
-    if not path.exists():
-        return path
-    parent = path.parent
-    stem = path.stem
-    suffix = path.suffix
-    i = 1
-    while True:
-        candidate = parent / f"{stem} ({i}){suffix}"
-        if not candidate.exists():
-            return candidate
-        i += 1
 
 
 def ensure_dir(path: Path, dry_run: bool = False):
