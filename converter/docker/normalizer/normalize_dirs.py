@@ -123,6 +123,90 @@ class Helper(object):
 
         return str(val).strip()
 
+    @staticmethod
+    def build_album_dir_name(
+            artist: str,
+            year: t.Optional[str],
+            album: str,
+            release_type: t.Optional[str],
+    ) -> str:
+        """
+        Construct an album directory name.
+        Format: "<Artist> - (<Year>) <Album Title> [<Release Type>]"
+
+        The release type is only included when present and not equal to 'LP'
+        (case-insensitive).
+        :param artist: Artist name.
+        :param year: Release year or None.
+        :param album: Album title.
+        :param release_type: Optional release type (e.g., 'EP', 'Single').
+        :return: Constructed directory name.
+        """
+        base_artist = artist or "Unknown Artist"
+        base_album = album or "Unknown Album"
+
+        parts = [f"{base_artist} - "]
+
+        if year:
+            parts.append(f"({year}) ")
+
+        parts.append(base_album)
+
+        if release_type:
+            normalized = release_type.strip().lower()
+            if normalized not in ("lp", "long play"):
+                parts.append(f" [{release_type}]")
+
+        return "".join(parts)
+
+    @staticmethod
+    def padded(n: int, width: int = 2) -> str:
+        """
+        Return a zero-padded string representation of a number.
+        :param n: Number to pad.
+        :param width: Minimum width of the resulting string.
+        :return: Zero-padded string.
+        """
+        return str(n).zfill(width)
+
+    @staticmethod
+    def sanitize_filename(name: str) -> str:
+        """
+        Sanitize a filename to improve cross-platform compatibility.
+        Removes forbidden characters, normalizes Unicode, and collapses
+        unnecessary whitespace.
+        :param name: Original filename string.
+        :return: A safe, cleaned filename string.
+        """
+        # Normalize Unicode to a decomposed form (removes accents when needed)
+        name = unicodedata.normalize('NFKD', name)
+
+        # Remove NUL characters explicitly
+        name = name.replace('\x00', '')
+
+        # Remove characters commonly forbidden in filenames
+        forbidden = r'<>:"/\\|?*'
+        for ch in forbidden:
+            name = name.replace(ch, '')
+
+        # Collapse multiple spaces and trim leading/trailing whitespace
+        name = re.sub(r'\s+', ' ', name).strip()
+
+        return name
+
+    @staticmethod
+    def ensure_dir(path: Path, dry_run: bool = False) -> None:
+        """
+        Ensure that a directory exists, creating it if necessary.
+        :param path: Directory path to create.
+        :param dry_run: If True, only log the action without performing it.
+        """
+        if dry_run:
+            logger.info(f"DRY RUN: would create directory: {path}")
+            return
+
+        path.mkdir(parents=True, exist_ok=True)
+
 
 class FileNormalizer(object):
 
@@ -288,7 +372,7 @@ class AlbumNormalizer(object):
     def process_album(self, dry_run: bool = False) -> bool:
         """
         Normalize the content of an album directory.
-        :param dry_run: don't apply anything.
+        :param dry_run: If True, only log the action without performing it.
         :return: True if it went successfully is, False otherwise.
         """
 
@@ -324,11 +408,7 @@ class AlbumNormalizer(object):
             else:
                 discs.add(1)
 
-        if not artist:
-            artist = 'Unknown Artist'
-        if not album:
-            album = self._path.name
-        album_dir_name = build_album_dir_name(artist, year, album, release_type)
+        album_dir_name = Helper.build_album_dir_name(artist, year, album, release_type)
 
         # If self._path is not already named like album_dir_name, attempt to rename directory
         parent = self._path.parent
@@ -376,14 +456,14 @@ class AlbumNormalizer(object):
 
         result = []
         for file_path, (disc, track, tags) in disc_map.items():
-            track_num = padded(track, 2)
+            track_num = Helper.padded(track, 2)
             filename = f"{track_num}. {tags.get('artist') or artist} - {tags.get('title') or file_path.stem}{file_path.suffix}"
             # Sanitize filename
-            filename = sanitize_filename(filename)
+            filename = Helper.sanitize_filename(filename)
             # For multi-disc: create per-disc subdir
             if multi_disc:
                 filename = f"{disc}/{discs_present} {filename}"
-                target_dir = f"{renamed_album_dir}/Disc {disc}"
+                target_dir = renamed_album_dir / f"Disc {disc}"
             else:
                 target_dir = renamed_album_dir
             target_path = target_dir / filename
@@ -395,13 +475,14 @@ class AlbumNormalizer(object):
             if target_path.exists() and SKIP_EXISTING:
                 logger.info(f"Skipping move because target exists and SKIP_EXISTING=yes: {target_path}")
                 continue
-            ensure_dir(target_dir, dry_run=dry_run)
+            Helper.ensure_dir(target_dir, dry_run=dry_run)
             try:
                 result.append(move_or_rename(file_path, target_path, dry_run=dry_run))
             except Exception as e:
                 logger.error(f"Failed to move {file_path} -> {target_path}: {e}")
                 result.append(False)
         return any(result)
+
 
 class Normalizer(object):
 
@@ -452,7 +533,7 @@ class Normalizer(object):
     def normalize(self, dry_run: bool = False) -> None:
         """
         Process all directory-albums recursively.
-        :param dry_run: don't apply anything
+        :param dry_run: If True, only log the action without performing it.
         :return: None
         """
         for ad in self.album_dirs:
@@ -460,35 +541,6 @@ class Normalizer(object):
                 ad.process_album(dry_run=dry_run)
             except Exception as e:
                 logger.exception(f"Error processing album {ad.path}: {e}")
-
-
-def padded(n: int, width: int = 2) -> str:
-    return str(n).zfill(width)
-
-
-def build_album_dir_name(artist: str, year: t.Optional[str], album: str, release_type: t.Optional[str]) -> str:
-    """Construct album dir name: <Artist> - (<Year>) <Album Title> [<Release Type>]
-
-    Release type is only included when present and not equal to 'LP' (case-insensitive).
-    """
-    parts = []
-    base_artist = artist or 'Unknown Artist'
-    base_album = album or 'Unknown Album'
-    parts.append(f"{base_artist} - ")
-    if year:
-        parts.append(f"({year}) ")
-    parts.append(base_album)
-    if release_type:
-        if release_type.strip().lower() not in ('lp', 'long play'):
-            parts.append(f" [{release_type}]")
-    return ''.join(parts)
-
-
-def ensure_dir(path: Path, dry_run: bool = False):
-    if dry_run:
-        logger.info(f"DRY RUN: would create directory: {path}")
-        return
-    path.mkdir(parents=True, exist_ok=True)
 
 
 def move_or_rename(src: Path, dst: Path, dry_run: bool = False):
@@ -517,24 +569,10 @@ def move_or_rename(src: Path, dst: Path, dry_run: bool = False):
     if dry_run:
         logger.info(f"DRY RUN: would move '{src}' -> '{dst}'")
         return True
-    ensure_dir(dst.parent, dry_run=False)
+    Helper.ensure_dir(dst.parent, dry_run=False)
     shutil.move(str(src), str(dst))
     logger.info(f"Moved '{src}' -> '{dst}'")
     return True
-
-
-def sanitize_filename(name: str) -> str:
-    # Remove problematic characters for cross-platform compatibility
-    name = unicodedata.normalize('NFKD', name)
-    # forbid NUL
-    name = name.replace('\x00', '')
-    # Strip characters commonly problematic in filenames
-    forbidden = r'<>:"/\\|?*'
-    for ch in forbidden:
-        name = name.replace(ch, '')
-    # Collapse multiple spaces
-    name = re.sub(r'\s+', ' ', name).strip()
-    return name
 
 
 def main(argv=None):
