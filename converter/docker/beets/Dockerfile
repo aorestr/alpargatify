@@ -1,23 +1,44 @@
 # docker/beets/Dockerfile
-FROM python:3.14
+FROM python:3.14-slim AS builder
 
-# Install minimal deps (file for mime detection)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    file \
-    && rm -rf /var/lib/apt/lists/*
+ARG BEETS_VERSION=2.5
+ENV DEBIAN_FRONTEND=noninteractive
 
-# create non-root user
+# Install system deps needed for beets plugins (file, ffmpeg if needed, libmagic, etc.)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+     file \
+     build-essential \
+     libmagic1 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Create a venv and install pinned beets into it
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copy pinned requirements (you should generate this with pip-compile or hand-pin)
+# For simplicity we install beets with extras: fetchart,embedart
+RUN pip install --upgrade pip setuptools wheel \
+  && pip install "beets[lastgenre,fetchart,embedart,lyrics]==${BEETS_VERSION}"
+
+# ---- final (runtime) image ----
+FROM python:3.14-slim AS runtime
+
+ENV PATH="/opt/venv/bin:$PATH"
+COPY --from=builder /opt/venv /opt/venv
+
+# minimal runtime system deps
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends file libmagic1 \
+  && rm -rf /var/lib/apt/lists/*
+
+# non-root user
 RUN useradd -m beets
 WORKDIR /home/beets
 
-# Install beets and selected plugins
-RUN pip install --no-cache-dir "beets[fetchart,embedart]"
-
-# Copy entrypoint into image
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Run as non-root user
 USER beets
-
 ENTRYPOINT ["/entrypoint.sh"]

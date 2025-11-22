@@ -10,6 +10,8 @@
 directory: /data
 library: /data/library.db
 
+threaded: yes
+
 import:
   move: yes        # move files into the library
   copy: no
@@ -27,23 +29,35 @@ art_filename: cover
 
 # Use inline plugin to define the extra variables
 plugins:
-  - inline
-  - musicbrainz # Music indexer
+  - inline      # Define custom item fields
+  - albumtypes  # Detect album types and let you edit them
+  - musicbrainz # Extract metadata from MusicBrainz
+  - lastgenre   # Guess genre from last.fm tags, needs installation
   - fetchart    # Download cover for album, needs installation
   - embedart    # Embed cover in songs, needs installation
+  - lyrics      # Fetch lyrics for songs, needs installation
 
 item_fields:
   disc_folder: f"Disc {disc:02d}" if disctotal > 1 else ""
   disc_and_track: f"{disc:02d}.{track:02d}" if disctotal > 1 else f"{track:02d}"
-  custom_album_type: f" {albumtype}" if albumtype and albumtype != "album" else ""
+
+albumtypes:
+  types:
+    - ep: 'EP'
+    - single: 'Single'
+    - soundtrack: 'OST'
+    - live: 'Live'
+    - compilation: 'Compilation'
+    - remix: 'Remix'
+  bracket: '[]'
 
 paths:
   # album directory: <AlbumArtist>/<AlbumArtist> - (<Year>) <Album Title> [<Release Type>]/
   # if multidisc: create "Disc <disc>/" subfolder and prefix filenames with "<disc>-<track_padded>"
   # if single-disc: place files directly and use "<track_padded>. <Artist> - <Title>"
-  default: $albumartist/$albumartist - ($year) $album$custom_album_type/$disc_folder/$disc_and_track. $artist - $title
+  default: $albumartist/$albumartist - [$year]$atypes $album/$disc_folder/$disc_and_track. $artist - $title
   singleton: Non-Album/$artist/$title
-  comp: Compilations/$album%aunique{}/$track $title
+  comp: Compilations/$album%aunique{}/$track. $artist -$title
 
 permitted_extensions:
   - mp3
@@ -53,3 +67,6 @@ permitted_extensions:
   - flac
   - wav
   - ogg
+
+lyrics:
+  sources: [genius, ]
