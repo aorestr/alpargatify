@@ -10,13 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd -m beets
 WORKDIR /home/beets
 
-# Install beets and select plugins
+# Install beets and selected plugins
 RUN pip install --no-cache-dir "beets[fetchart,embedart]"
 
-# Copy entrypoint
-COPY beets_config.yaml /app/beets_config.yaml
+# Copy entrypoint into image
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+# Run as non-root user
 USER beets
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -1,5 +1,11 @@
-# Minimal beets configuration: operate on /data and normalize file paths
-# Moves files into a consistent library layout and writes tags.
+# Minimal beets configuration (used inside container). The wrapper mounts your host config on /config.yaml
+# Changed paths to produce:
+#   /<AlbumArtist>/
+#       <Artist> - (<Year>) <Album Title> [<Release Type>]/
+#           (if multi-disc) Disc <N>/
+#               <N>-<track_padded>. <Artist> - <Title>.<ext>
+#           (if single-disc)
+#               <track_padded>. <Artist> - <Title>.<ext>
 
 directory: /data
 library: /home/beets/library.db
@@ -13,9 +19,30 @@ import:
   incremental: no
   quiet: yes
   autotag: yes
+  # On duplicates: remove the old item so the new import overwrites
+  duplicate_action: remove
+
+# Keep cover art handling minimal
+art_filename: cover
+
+# Use inline plugin to define the extra variables
+plugins:
+  - inline
+  - musicbrainz # Music indexer
+  - fetchart    # Download cover for album, needs installation
+  - embedart    # Embed cover in songs, needs installation
+
+item_fields:
+  disc_folder: f"Disc {disc:02d}" if disctotal > 1 else ""
+  disc_and_track: f"{disc:02d}.{track:02d}" if disctotal > 1 else f"{track:02d}"
 
 paths:
-  default: "$albumartist/$album/$track - $title"
+  # album directory: <AlbumArtist>/<AlbumArtist> - (<Year>) <Album Title> [<Release Type>]/
+  # if multidisc: create "Disc <disc>/" subfolder and prefix filenames with "<disc>-<track_padded>"
+  # if single-disc: place files directly and use "<track_padded>. <Artist> - <Title>"
+  default: $albumartist/$albumartist - ($year) $album%if{$albumtype, [$albumtype]}/$disc_folder/$disc_and_track. $artist - $title
+  singleton: Non-Album/$artist/$title
+  comp: Compilations/$album%aunique{}/$track $title
 
 permitted_extensions:
   - mp3
@@ -25,11 +52,3 @@ permitted_extensions:
   - flac
   - wav
   - ogg
-
-plugins:
-  - musicbrainz # Music indexer
-  - fetchart    # Download cover for album
-  - embedart    # Embed cover in songs
-
-# Keep cover art handling minimal
-art_filename: cover

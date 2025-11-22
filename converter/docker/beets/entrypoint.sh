@@ -4,20 +4,29 @@ IFS=$'\n\t'
 
 # Config and source path (allow override from environment)
 CONFIG_PATH=${BEETS_CONFIG_PATH:-/config.yaml}
-SRC_DIR=${IMPORT_SRC:-/data}
+IMPORT_SRC_PATH=${IMPORT_SRC_PATH:-/import}
+DRY_RUN=${DRY_RUN:-no}
 
-# Run beets import (use `beet` CLI). Use -c to point to config file.
-# -y answers yes to prompts so the container runs unattended.
-# We avoid extra flags so the container works with the minimal beets install.
-exec beet -c "$CONFIG_PATH" import "$SRC_DIR" || exit_code=$?
+# Run beets import.
+# We instruct beets to import the IMPORT_SRC_PATH directory.
+# -c config file path
+# --move causes beets to move files into the library directory (not copy)
+# --yes answers confirmations
+# If DRY_RUN=yes, use --pretend so beets does not actually move files.
+BEET_CMD=(beet -c "$CONFIG_PATH" import)
+if [ "$DRY_RUN" = "yes" ]; then
+  BEET_CMD+=(--pretend)
+else
+  BEET_CMD+=(--move)
+fi
+BEET_CMD+=("$IMPORT_SRC_PATH")
 
-# Capture exit code: if beet failed, still write sentinel so dependent container sees completion
-exit_code=${exit_code:-0}
+echo "Running: $(printf "%s " "${BEET_CMD[@]}" | tr '\n' ' ')"
+set +e
+"${BEET_CMD[@]}"
+EXIT_CODE=$?
+set -e
 
-echo "Beets finished with exit code $exit_code"
-# Create a sentinel file inside the shared /data volume so the normalizer can detect completion
-# We include the exit code for debugging.
-printf "beets_exit=%s\nfinished_at=%s\n" "$exit_code" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$SENTINEL_FILE" || true
+echo "Beets finished with exit code $EXIT_CODE"
 
-# Exit with the same code beets had
-exit "$exit_code"
+exit "$EXIT_CODE"
