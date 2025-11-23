@@ -10,7 +10,6 @@ EnableInsightsCollector = true              # Default, but keep it true to colle
 EnableSharing = true
 LogLevel = "info"                           # Keep it at info
 MusicFolder = "/music"                      # Default music folder
-Port = 4533                                 # Default port
 SessionTimeout = "48h"                      # 48 hours, default
 TranscodingCacheSize = "100MB"
 UILoginBackgroundURL = "/backgrounds"

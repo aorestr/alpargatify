@@ -13,3 +13,6 @@
 # Database and cache files
 .db*
 **/cache/
+
+# Environment files
+*.env

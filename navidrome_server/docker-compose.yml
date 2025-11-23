@@ -1,0 +1,15 @@
+services:
+  navidrome:
+    image: deluan/navidrome:${NAVIDROME_VERSION}
+    user: ${PUID}:${PGID}
+    ports:
+      - "4533:${NAVIDROME_PORT}"
+    restart: unless-stopped
+    environment:
+      ND_PORT: ${NAVIDROME_PORT}
+      ND_CONFIGFILE: /data/navidrome.toml
+      ND_LASTFM_APIKEY: ${LASTFM_APIKEY}
+      ND_LASTFM_SECRET: ${LASTFM_SECRET}
+    volumes:
+      - "${NAVIDROME_CONFIG_PATH}:/data"
+      - "${NAVIDROME_MUSIC_PATH}:/music:ro"
