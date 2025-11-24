@@ -7,9 +7,9 @@ scrape_configs:
 
   # Navidrome: replace the metrics_path to match ND_PROMETHEUS_METRICSPATH you set
   - job_name: 'navidrome'
-    metrics_path: /metrics
+    metrics_path: <custom_metrics_path>
     static_configs:
-      - targets: ['navidrome:4533']
+      - targets: ['navidrome:<navidrome_port>']
 
   # cAdvisor (container metrics)
   - job_name: 'cadvisor'

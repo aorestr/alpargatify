@@ -10,6 +10,7 @@ services:
       ND_CONFIGFILE: /data/navidrome.toml
       ND_LASTFM_APIKEY: ${LASTFM_APIKEY}
       ND_LASTFM_SECRET: ${LASTFM_SECRET}
+      ND_PROMETHEUS_METRICSPATH: ${CUSTOM_METRICS_PATH}
     volumes:
       - "${NAVIDROME_CONFIG_PATH}:/data"
       - "${NAVIDROME_MUSIC_PATH}:/music:ro"

@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# bootstrap.sh - prepare config, validate ownership, copy templates and launch docker-compose
+# bootstrap.sh - prepare config, render a small set of templates safely, validate ownership, copy templates and launch docker-compose
 # - creates config dir if missing
-# - substitutes simple template variables in docker-compose files
-# - exports PUID and PGID derived from NAVIDROME paths
+# - generates a random CUSTOM_METRICS_PATH for Prometheus to scrape Navidrome
+# - substitutes variables only in configs/prometheus.yml and configs/Caddyfile (not in docker-compose files)
+# - exports PUID and PGID derived from NAVIDROME paths and other env vars for docker compose
 # - copies navidrome.toml and background directory into config path
 # - runs all docker-compose*.yml files found next to the script (combined)
+#
 # Modes:
-#   Default: bring services up (docker compose up -d / docker-compose up -d)
-#   --down : stop services (docker compose down / docker-compose down)
+#   Default: bring services up (compose up -d)
+#   --down : stop services (compose down)
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -15,21 +17,15 @@ IFS=$'\n\t'
 ###############################################################################
 # Helpers
 ###############################################################################
-err() {
-  echo "ERROR: $*" >&2
-}
-
-info() {
-  echo "INFO: $*"
-}
-
-warn() {
-  echo "WARN: $*" >&2
-}
+err()   { echo "ERROR: $*" >&2; }
+info()  { echo "INFO: $*"; }
+warn()  { echo "WARN: $*" >&2; }
 
 cleanup_tmpfiles() {
   if [[ "${TMP_FILES_CREATED:-}" == "1" ]]; then
-    rm -f "${TMP_FILES[@]:-}" || true
+    for f in "${TMP_FILES[@]:-}"; do
+      [[ -f "$f" ]] && rm -f "$f" || true
+    done
   fi
 }
 trap cleanup_tmpfiles EXIT
@@ -53,7 +49,6 @@ Examples:
 EOF
 }
 
-# simple args parser
 POSITIONAL=()
 while (( "$#" )); do
   case "$1" in
@@ -78,7 +73,6 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 # Export variables from .env safely (ignores commented lines)
-# Using set -a / source to allow variable expansion in dotenv values
 set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
@@ -87,12 +81,15 @@ set +a
 ###############################################################################
 # Required variables (basic validation)
 ###############################################################################
+: "${DOMAIN:?"DOMAIN is not set in .env"}"
 : "${NAVIDROME_VERSION:?"NAVIDROME_VERSION is not set in .env"}"
 : "${NAVIDROME_CONFIG_PATH:?"NAVIDROME_CONFIG_PATH is not set in .env"}"
 : "${NAVIDROME_MUSIC_PATH:?"NAVIDROME_MUSIC_PATH is not set in .env"}"
+: "${NAVIDROME_PORT:?"NAVIDROME_PORT is not set in .env"}"
+: "${GRAFANA_PORT:?"GRAFANA_PORT is not set in .env"}"
 
 ###############################################################################
-# Show information to user (what will be used)
+# Show info
 ###############################################################################
 echo
 echo "==== Navidrome bootstrap - summary ===="
@@ -105,7 +102,7 @@ echo "======================================"
 echo
 
 ###############################################################################
-# Ensure config directory exists (create if missing)
+# Ensure config and music directories exist
 ###############################################################################
 if [[ ! -d "$NAVIDROME_CONFIG_PATH" ]]; then
   info "Config directory does not exist; creating: $NAVIDROME_CONFIG_PATH"
@@ -114,11 +111,6 @@ else
   info "Config directory exists: $NAVIDROME_CONFIG_PATH"
 fi
 
-###############################################################################
-# Ensure music directory exists (create if missing) - we create it so we can
-# reliably read numeric uid/gid. If user prefers not to create it, they can
-# create beforehand and re-run.
-###############################################################################
 if [[ ! -d "$NAVIDROME_MUSIC_PATH" ]]; then
   warn "Music directory does not exist; creating: $NAVIDROME_MUSIC_PATH"
   mkdir -p "$NAVIDROME_MUSIC_PATH"
@@ -162,6 +154,23 @@ export PGID="$MUSIC_GID"
 info "Exported PUID=${PUID}, PGID=${PGID}"
 
 ###############################################################################
+# Generate random CUSTOM_METRICS_PATH for Prometheus to scrape Navidrome
+# Example: /metrics/nd-5f3a1b2c
+###############################################################################
+rand_hex() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 4
+  else
+    od -An -N4 -tx1 /dev/urandom | tr -d ' \n'
+  fi
+}
+
+RAN_SUFFIX="$(rand_hex)"
+CUSTOM_METRICS_PATH="/metrics/nd-${RAN_SUFFIX}"
+export CUSTOM_METRICS_PATH
+info "Generated CUSTOM_METRICS_PATH=${CUSTOM_METRICS_PATH}"
+
+###############################################################################
 # Copy navidrome.toml and background directory into config path
 ###############################################################################
 TOML_SRC="$SCRIPT_DIR/configs/navidrome.toml"
@@ -171,16 +180,14 @@ if [[ -f "$TOML_SRC" ]]; then
   info "Copying navidrome.toml to ${NAVIDROME_CONFIG_PATH}/navidrome.toml"
   cp -a "$TOML_SRC" "${NAVIDROME_CONFIG_PATH}/navidrome.toml"
 else
-  warn "navidrome.toml not found in $SCRIPT_DIR. Skipping copy."
+  warn "navidrome.toml not found in $SCRIPT_DIR/configs. Skipping copy."
 fi
 
 if [[ -d "$BACKGROUND_SRC" ]]; then
   info "Copying background directory to ${NAVIDROME_CONFIG_PATH}/background"
-  # use rsync if available for reliable recursive copy preserving attributes
   if command -v rsync >/dev/null 2>&1; then
     rsync -a "$BACKGROUND_SRC"/ "${NAVIDROME_CONFIG_PATH}/background"/
   else
-    # fallback to cp -a
     mkdir -p "${NAVIDROME_CONFIG_PATH}/background"
     cp -a "$BACKGROUND_SRC"/. "${NAVIDROME_CONFIG_PATH}/background"/
   fi
@@ -189,23 +196,119 @@ else
 fi
 
 ###############################################################################
-# Determine docker compose command (docker compose vs docker-compose)
+# Template expansion helper
+# - we will only render the two config files: configs/prometheus.yml and configs/Caddyfile
+# - first we replace the custom placeholders (e.g. <custom_metrics_path>, <domain>, <navidrome_port>, <grafana_port>)
+#   with ${VAR} style placeholders, then we expand environment variables.
+#
+# Expansion strategy:
+# 1) Prefer envsubst if available.
+# 2) Else use perl (recommended fallback).
+# 3) Else final fallback: use a safe-ish eval echo per-line expansion (only as last resort).
 ###############################################################################
-COMPOSE_CMD=""
+TMP_FILES_CREATED=0
+TMP_FILES=()
+
+expand_vars_file() {
+  local src="$1"; local dst="$2"
+  if [[ ! -f "$src" ]]; then
+    err "Template not found: $src"; return 1
+  fi
+
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/render.XXXXXX")"
+  TMP_FILES_CREATED=1
+  TMP_FILES+=("$tmp")
+
+  # copy source to tmp
+  cp -a "$src" "$tmp"
+
+  # Replace angle-bracket placeholders with ${VAR} so expansion works
+  sed -i.bak \
+    -e 's|<custom_metrics_path>|${CUSTOM_METRICS_PATH}|g' \
+    -e 's|<navidrome_port>|${NAVIDROME_PORT}|g' \
+    -e 's|<domain>|${DOMAIN}|g' \
+    -e 's|<grafana_port>|${GRAFANA_PORT}|g' \
+    "$tmp" && rm -f "${tmp}.bak" || true
+
+  # 1) Try envsubst
+  if command -v envsubst >/dev/null 2>&1; then
+    envsubst < "$tmp" > "$dst"
+    info "Rendered $src -> $dst using envsubst"
+    return 0
+  fi
+
+  # 2) Try perl substitution using %ENV
+  if command -v perl >/dev/null 2>&1; then
+    # Replace ${VAR} or $VAR with the corresponding env value if present; otherwise leave as-is
+    perl -0777 -pe 's/\$\{?([A-Z0-9_]+)\}?/exists $ENV{$1} ? $ENV{$1} : $&/ge' "$tmp" > "$dst"
+    info "Rendered $src -> $dst using perl"
+    return 0
+  fi
+
+  # 3) Final fallback: line-by-line eval expansion.
+  # NOTE: using eval is potentially risky if template contains untrusted content.
+  # We only use it as last resort on user-controlled local files.
+  warn "envsubst and perl not found; falling back to line-by-line eval expansion for $src"
+  : > "$dst"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # escape backticks to reduce risk
+    safe_line="${line//\`/\\\`}"
+    # Use eval to expand variables like ${VAR} and $VAR
+    # This purposely preserves whitespace and handles empty variables correctly
+    eval "echo \"$safe_line\"" >> "$dst"
+    echo >> "$dst"
+  done < "$tmp"
+
+  info "Rendered $src -> $dst using fallback eval"
+  return 0
+}
+
+###############################################################################
+# Render configs/prometheus.yml -> NAVIDROME_CONFIG_PATH/prometheus.yml
+###############################################################################
+PROM_SRC="$SCRIPT_DIR/configs/prometheus.yml"
+PROM_DST="$SCRIPT_DIR/configs/prometheus.yml.custom"
+if [[ -f "$PROM_SRC" ]]; then
+  if ! expand_vars_file "$PROM_SRC" "$PROM_DST"; then
+    warn "Failed to render prometheus.yml; copying original as fallback"
+    cp -a "$PROM_SRC" "$PROM_DST"
+  fi
+else
+  warn "configs/prometheus.yml not found; skipping rendering."
+fi
+
+###############################################################################
+# Render configs/Caddyfile -> NAVIDROME_CONFIG_PATH/Caddyfile
+###############################################################################
+CADDY_SRC="$SCRIPT_DIR/configs/Caddyfile"
+CADDY_DST="$SCRIPT_DIR/configs/Caddyfile.custom"
+if [[ -f "$CADDY_SRC" ]]; then
+  if ! expand_vars_file "$CADDY_SRC" "$CADDY_DST"; then
+    warn "Failed to render Caddyfile; copying original as fallback"
+    cp -a "$CADDY_SRC" "$CADDY_DST"
+  fi
+else
+  warn "configs/Caddyfile not found; skipping rendering."
+fi
+
+###############################################################################
+# Determine docker compose availability and create a compose() wrapper
+# This avoids branching on every invocation.
+###############################################################################
 if docker compose version >/dev/null 2>&1; then
-  COMPOSE_CMD="docker compose"
+  compose() { docker compose "$@"; }
 elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE_CMD="docker-compose"
+  compose() { docker-compose "$@"; }
 else
   err "Neither 'docker compose' nor 'docker-compose' found. Install Docker Compose."
   exit 6
 fi
-info "Using compose command: ${COMPOSE_CMD}"
+info "Compose command wrapper is ready."
 
 ###############################################################################
-# Gather docker-compose files (fail if none found)
+# Gather docker-compose files (we will NOT render them; pass original files)
 ###############################################################################
-# Use nullglob to avoid literal pattern if no files exist
 shopt -s nullglob
 compose_ymls=( "$SCRIPT_DIR"/docker-compose*.yml )
 shopt -u nullglob
@@ -215,29 +318,30 @@ if [[ ${#compose_ymls[@]} -eq 0 ]]; then
   exit 7
 fi
 
-compose_files=()
+compose_args=()
 for f in "${compose_ymls[@]}"; do
-  compose_files+=(-f "$f")
+  compose_args+=(-f "$f")
 done
 
 ###############################################################################
-# Invoke compose with selected mode
+# Export any additional vars that may be used by compose via environment
+# (we already exported PUID, PGID and CUSTOM_METRICS_PATH; also export DOMAIN,
+# NAVIDROME_PORT, GRAFANA_PORT just to be safe)
+###############################################################################
+export DOMAIN
+export NAVIDROME_PORT
+export GRAFANA_PORT
+
+###############################################################################
+# Invoke compose with selected mode using original compose files
 ###############################################################################
 info "Invoking docker compose mode: ${MODE}"
 
 if [[ "$MODE" == "up" ]]; then
-  if [[ "$COMPOSE_CMD" == "docker compose" ]]; then
-    docker compose "${compose_files[@]}" up -d
-  else
-    docker-compose "${compose_files[@]}" up -d
-  fi
+  compose "${compose_args[@]}" up -d
   EXIT_CODE=$?
 elif [[ "$MODE" == "down" ]]; then
-  if [[ "$COMPOSE_CMD" == "docker compose" ]]; then
-    docker compose  "${compose_files[@]}" down
-  else
-    docker-compose "${compose_files[@]}" down
-  fi
+  compose "${compose_args[@]}" down
   EXIT_CODE=$?
 else
   err "Unknown MODE: $MODE"
@@ -250,3 +354,5 @@ if [[ $EXIT_CODE -ne 0 ]]; then
 fi
 
 info "Compose command finished successfully."
+info "Prometheus will scrape navidrome on path: ${CUSTOM_METRICS_PATH}"
+info "Rendered prometheus.yml & Caddyfile have been placed under ${NAVIDROME_CONFIG_PATH}"
