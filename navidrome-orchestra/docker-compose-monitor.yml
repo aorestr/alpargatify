@@ -32,7 +32,7 @@ services:
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
     ports:
-      - "9090:9090"
+      - "9090:${PROMETHEUS_PORT}"
     volumes:
       - ./configs/prometheus.yml.custom:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -43,9 +43,8 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.52.0
     container_name: cadvisor
-    privileged: true
     ports:
-      - "8080:8080"
+      - "8080:${CADVISOR_PORT}"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:rw                # Only works with rw permissions
@@ -59,7 +58,7 @@ services:
     image: prom/node-exporter:v1.10.2
     container_name: node-exporter
     ports:
-      - 9100:9100
+      - 9100:${NODE_EXPORTER_PORT}
     networks:
       - navidrome
     restart: unless-stopped

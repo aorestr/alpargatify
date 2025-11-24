@@ -87,6 +87,9 @@ set +a
 : "${NAVIDROME_MUSIC_PATH:?"NAVIDROME_MUSIC_PATH is not set in .env"}"
 : "${NAVIDROME_PORT:?"NAVIDROME_PORT is not set in .env"}"
 : "${GRAFANA_PORT:?"GRAFANA_PORT is not set in .env"}"
+: "${PROMETHEUS_PORT:?"PROMETHEUS_PORT is not set in .env"}"
+: "${CADVISOR_PORT:?"CADVISOR_PORT is not set in .env"}"
+: "${NODE_EXPORTER_PORT:?"NODE_EXPORTER_PORT is not set in .env"}"
 
 ###############################################################################
 # Show info
@@ -155,7 +158,7 @@ info "Exported PUID=${PUID}, PGID=${PGID}"
 
 ###############################################################################
 # Generate random CUSTOM_METRICS_PATH for Prometheus to scrape Navidrome
-# Example: /metrics/nd-5f3a1b2c
+# Example: /metrics-5f3a1b2c
 ###############################################################################
 rand_hex() {
   if command -v openssl >/dev/null 2>&1; then
@@ -166,7 +169,7 @@ rand_hex() {
 }
 
 RAN_SUFFIX="$(rand_hex)"
-CUSTOM_METRICS_PATH="/metrics/nd-${RAN_SUFFIX}"
+CUSTOM_METRICS_PATH="/metrics-${RAN_SUFFIX}"
 export CUSTOM_METRICS_PATH
 info "Generated CUSTOM_METRICS_PATH=${CUSTOM_METRICS_PATH}"
 
@@ -198,7 +201,7 @@ fi
 ###############################################################################
 # Template expansion helper
 # - we will only render the two config files: configs/prometheus.yml and configs/Caddyfile
-# - first we replace the custom placeholders (e.g. <custom_metrics_path>, <domain>, <navidrome_port>, <grafana_port>)
+# - first we replace the custom placeholders (e.g. <custom_metrics_path>, <domain>, <navidrome_port>, <prometheus_port>, <cadvisor_port>, <node_exporter_port>, <grafana_port>)
 #   with ${VAR} style placeholders, then we expand environment variables.
 #
 # Expansion strategy:
@@ -227,6 +230,9 @@ expand_vars_file() {
   sed -i.bak \
     -e 's|<custom_metrics_path>|${CUSTOM_METRICS_PATH}|g' \
     -e 's|<navidrome_port>|${NAVIDROME_PORT}|g' \
+    -e 's|<prometheus_port>|${PROMETHEUS_PORT}|g' \
+    -e 's|<cadvisor_port>|${CADVISOR_PORT}|g' \
+    -e 's|<node_exporter_port>|${NODE_EXPORTER_PORT}|g' \
     -e 's|<domain>|${DOMAIN}|g' \
     -e 's|<grafana_port>|${GRAFANA_PORT}|g' \
     "$tmp" && rm -f "${tmp}.bak" || true
@@ -265,7 +271,7 @@ expand_vars_file() {
 }
 
 ###############################################################################
-# Render configs/prometheus.yml -> NAVIDROME_CONFIG_PATH/prometheus.yml
+# Render configs/prometheus.yml -> configs/prometheus.yml.custom
 ###############################################################################
 PROM_SRC="$SCRIPT_DIR/configs/prometheus.yml"
 PROM_DST="$SCRIPT_DIR/configs/prometheus.yml.custom"
@@ -279,7 +285,7 @@ else
 fi
 
 ###############################################################################
-# Render configs/Caddyfile -> NAVIDROME_CONFIG_PATH/Caddyfile
+# Render configs/Caddyfile -> configs/Caddyfile.custom
 ###############################################################################
 CADDY_SRC="$SCRIPT_DIR/configs/Caddyfile"
 CADDY_DST="$SCRIPT_DIR/configs/Caddyfile.custom"
@@ -324,13 +330,15 @@ for f in "${compose_ymls[@]}"; do
 done
 
 ###############################################################################
-# Export any additional vars that may be used by compose via environment
-# (we already exported PUID, PGID and CUSTOM_METRICS_PATH; also export DOMAIN,
-# NAVIDROME_PORT, GRAFANA_PORT just to be safe)
+# Export env vars for compose
 ###############################################################################
 export DOMAIN
 export NAVIDROME_PORT
 export GRAFANA_PORT
+export PROMETHEUS_PORT
+export CADVISOR_PORT
+export NODE_EXPORTER_PORT
+export CUSTOM_METRICS_PATH
 
 ###############################################################################
 # Invoke compose with selected mode using original compose files
@@ -338,7 +346,8 @@ export GRAFANA_PORT
 info "Invoking docker compose mode: ${MODE}"
 
 if [[ "$MODE" == "up" ]]; then
-  compose "${compose_args[@]}" up -d
+  # Force recreate so we make sure configuration stays correct
+  compose "${compose_args[@]}" up -d --force-recreate	
   EXIT_CODE=$?
 elif [[ "$MODE" == "down" ]]; then
   compose "${compose_args[@]}" down
