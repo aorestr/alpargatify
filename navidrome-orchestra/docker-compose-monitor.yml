@@ -31,9 +31,8 @@ services:
       - '--web.console.libraries=/etc/prometheus/console_libraries'
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
-    # Access only through Docker network
-    # ports:
-    #   - "9090:9090"
+    ports:
+      - "9090:9090"
     volumes:
       - ./configs/prometheus.yml.custom:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -45,9 +44,8 @@ services:
     image: gcr.io/cadvisor/cadvisor:v0.52.0
     container_name: cadvisor
     privileged: true
-    # Access only through Docker network
-    # ports:
-    #   - "8080:8080"
+    ports:
+      - "8080:8080"
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:rw                # Only works with rw permissions
@@ -60,9 +58,8 @@ services:
   node-exporter:
     image: prom/node-exporter:v1.10.2
     container_name: node-exporter
-    # Access only through Docker network
-    # ports:
-    #   - 9100:9100
+    ports:
+      - 9100:9100
     networks:
       - navidrome
     restart: unless-stopped
