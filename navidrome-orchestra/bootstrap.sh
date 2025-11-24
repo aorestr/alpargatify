@@ -364,4 +364,3 @@ fi
 
 info "Compose command finished successfully."
 info "Prometheus will scrape on path: ${CUSTOM_METRICS_PATH}"
-info "Rendered prometheus.yml & Caddyfile have been placed under ${NAVIDROME_CONFIG_PATH}"
