@@ -13,7 +13,6 @@ LogLevel = "info"                           # Keep it at info
 MusicFolder = "/music"                      # Default music folder
 SessionTimeout = "48h"                      # 48 hours, default
 TranscodingCacheSize = "100MB"
-UILoginBackgroundURL = "/backgrounds"
 UIWelcomeMessage = "Gracias por estar aquí"
 
 [Backup]

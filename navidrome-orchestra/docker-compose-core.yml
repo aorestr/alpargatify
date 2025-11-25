@@ -11,11 +11,12 @@ services:
       ND_LASTFM_APIKEY: ${LASTFM_APIKEY}
       ND_LASTFM_SECRET: ${LASTFM_SECRET}
       ND_PROMETHEUS_METRICSPATH: ${CUSTOM_METRICS_PATH}
+      ND_UILOGINBACKGROUNDURL: /backgrounds
     volumes:
       - "${NAVIDROME_MUSIC_PATH}:/music:ro"
       - "${VOLUMES_PATH}/navidrome:/data"
       - "./configs/navidrome.toml:/data/navidrome.toml:ro"
-      - "${BACKGROUNDS_PATH}:/data/backgrounds:ro"
+      - "${BACKGROUNDS_PATH}:/backgrounds:ro"
     networks:
       - navidrome
     restart: unless-stopped

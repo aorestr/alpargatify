@@ -21,7 +21,7 @@ IFS=$'\n\t'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Defaults
-BEETS_CONFIG="$SCRIPT_DIR/docker/beets/beets_config.yaml"
+BEETS_CONFIG="$SCRIPT_DIR/beets/beets_config.yaml"
 FORCE="no"
 DRY_RUN="no"
 
@@ -100,13 +100,12 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Compose command check (docker compose or docker-compose)
-COMPOSE_CMD=""
 if docker compose version >/dev/null 2>&1; then
-  COMPOSE_CMD="docker compose"
+  compose() { docker compose "$@"; }
 elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE_CMD="docker-compose"
+  compose() { docker-compose "$@"; }
 else
-  echo "Error: neither 'docker compose' nor 'docker-compose' found. Install Docker Compose." >&2
+  echo "Neither 'docker compose' nor 'docker-compose' found. Install Docker Compose." >&2
   exit 6
 fi
 
@@ -128,7 +127,6 @@ echo "Beets config:       $BEETS_CONFIG"
 echo "Force:              $FORCE"
 echo "Dry run:            $DRY_RUN"
 echo "Mode:               $MODE"
-echo "Docker compose:     $COMPOSE_CMD"
 echo "================"
 echo
 
@@ -180,7 +178,7 @@ else
 fi
 
 # Step 2: run beets import service (single service)
-COMPOSE_FILE="$SCRIPT_DIR/docker/docker-compose.yml"
+COMPOSE_FILE="$SCRIPT_DIR/beets/docker-compose.yml"
 if [ ! -f "$COMPOSE_FILE" ]; then
   echo "Error: docker compose file not found at $COMPOSE_FILE" >&2
   exit 7
@@ -215,16 +213,11 @@ export DRY_RUN="$DRY_RUN"
 export IMPORT_MODE="$IMPORT_MODE"
 
 echo "-> invoking docker compose (beets import)"
-pushd "$SCRIPT_DIR/docker" >/dev/null
+pushd "$SCRIPT_DIR/beets" >/dev/null
 
 # Use --abort-on-container-exit so compose stops after the one-shot service finishes
-if [ "$COMPOSE_CMD" = "docker compose" ]; then
-  docker compose -f docker-compose.yml up --build --abort-on-container-exit
-  EXIT_CODE=$?
-else
-  docker-compose -f docker-compose.yml up --build --abort-on-container-exit
-  EXIT_CODE=$?
-fi
+compose -f docker-compose.yml up --build --abort-on-container-exit
+EXIT_CODE=$?
 
 popd >/dev/null
 
