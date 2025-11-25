@@ -4,7 +4,7 @@ services:
     image: grafana/grafana:12.3
     container_name: grafana
     ports:
-      - "3005:${GRAFANA_PORT}"
+      - "${GRAFANA_PORT}:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
@@ -22,17 +22,18 @@ services:
     image: prom/prometheus:v3.7.3
     container_name: prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=5d'
-      - '--storage.tsdb.retention.size=10GB'
-      - '--storage.tsdb.min-block-duration=1h'
-      - '--storage.tsdb.max-block-duration=12h'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=5d
+      - --storage.tsdb.retention.size=10GB
+      - --storage.tsdb.min-block-duration=1h
+      - --storage.tsdb.max-block-duration=12h
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --web.console.templates=/etc/prometheus/consoles
+      - --web.enable-lifecycle
+      - --web.listen-address=:${PROMETHEUS_PORT}
     ports:
-      - "9090:${PROMETHEUS_PORT}"
+      - "${PROMETHEUS_PORT}:${PROMETHEUS_PORT}"
     volumes:
       - ./configs/prometheus.yml.custom:/etc/prometheus/prometheus.yml:ro
       - ${VOLUMES_PATH}/prometheus:/prometheus

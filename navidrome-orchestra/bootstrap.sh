@@ -14,11 +14,51 @@ set -euo pipefail
 IFS=$'\n\t'
 
 ###############################################################################
-# Helpers
+# Colors (portable-ish): red for error, orange-ish for warn if possible
 ###############################################################################
-err()   { echo "ERROR: $*" >&2; }
+_init_colors() {
+  RED=""
+  ORANGE=""
+  RESET=""
+
+  # Prefer tput when available for reset
+  if command -v tput >/dev/null 2>&1; then
+    # try to get reset
+    RESET="$(tput sgr0 2>/dev/null || true)"
+  else
+    RESET="\033[0m"
+  fi
+
+  # Detect 256-color capable terminals (TERM contains 256color)
+  if [[ "${TERM:-}" == *256color* ]]; then
+    # Orange-like (color 208)
+    ORANGE="\033[38;5;208m"
+    RED="\033[31m"
+  else
+    # Fallback to tput setaf or basic ANSI
+    if command -v tput >/dev/null 2>&1; then
+      # tput may return codes; if it fails, fall back to ANSI
+      RED="$(tput setaf 1 2>/dev/null || echo -e '\033[31m')"
+      # no standard tput for "orange" — use yellow
+      ORANGE="$(tput setaf 3 2>/dev/null || echo -e '\033[33m')"
+    else
+      RED="\033[31m"
+      ORANGE="\033[33m"
+    fi
+  fi
+
+  # If stdout/stderr not a terminal, disable colors to keep logs clean
+  if [[ ! -t 2 ]]; then
+    RED=""
+    ORANGE=""
+    RESET=""
+  fi
+}
+_init_colors
+
+err()   { echo -e "${RED}ERROR:${RESET} $*" >&2; }
 info()  { echo "INFO: $*"; }
-warn()  { echo "WARN: $*" >&2; }
+warn()  { echo -e "${ORANGE}WARN:${RESET} $*" >&2; }
 
 cleanup_tmpfiles() {
   if [[ "${TMP_FILES_CREATED:-}" == "1" ]]; then
@@ -82,21 +122,43 @@ set +a
 ###############################################################################
 : "${DOMAIN:?"DOMAIN is not set in .env"}"
 : "${NAVIDROME_MUSIC_PATH:?"NAVIDROME_MUSIC_PATH is not set in .env"}"
+# NAVIDROME_PORT kept mandatory (example service); other ports handled dynamically
 : "${NAVIDROME_PORT:?"NAVIDROME_PORT is not set in .env"}"
-: "${GRAFANA_PORT:?"GRAFANA_PORT is not set in .env"}"
-: "${PROMETHEUS_PORT:?"PROMETHEUS_PORT is not set in .env"}"
-: "${CADVISOR_PORT:?"CADVISOR_PORT is not set in .env"}"
-: "${NODE_EXPORTER_PORT:?"NODE_EXPORTER_PORT is not set in .env"}"
-: "${SFTP_PORT:?"SFTP_PORT is not set in .env"}"
-# Check user/password vars
-if [ -z "$GRAFANA_ADMIN_USER" ] ||  -z "$GRAFANA_ADMIN_PASSWORD" ]; then
+
+if [ -z "${GRAFANA_ADMIN_USER:-}" ] ||  [ -z "${GRAFANA_ADMIN_PASSWORD:-}" ]; then
   err "GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must be set in .env. Exiting."
   exit 3
 fi
-if [ -z "$SFTP_USER" ] ||  -z "$SFTP_PASSWORD" ]; then
+if [ -z "${SFTP_USER:-}" ] ||  [ -z "${SFTP_PASSWORD:-}" ]; then
   err "SFTP_USER and SFTP_PASSWORD must be set in .env. Exiting."
   exit 3
 fi
+
+###############################################################################
+# Collect and validate all *_PORT variables dynamically
+# - builds PORT_VARS array containing variable names (e.g. PROMETHEUS_PORT)
+# - optionally validates they are non-empty and numeric
+###############################################################################
+PORT_VARS=()
+while IFS='=' read -r name _; do
+  if [[ "$name" =~ _PORT$ ]]; then
+    PORT_VARS+=("$name")
+  fi
+done < <(env)
+
+# Ensure at least the NAVIDROME_PORT exists (we required it earlier), and validate numeric
+for pv in "${PORT_VARS[@]:-}"; do
+  val="${!pv:-}"
+  if [[ -z "$val" ]]; then
+    warn "Port var $pv is empty or not set."
+  else
+    # basic numeric check
+    if ! [[ "$val" =~ ^[0-9]+$ ]]; then
+      err "Port variable $pv has a non-numeric value: '$val'. Ports must be numeric."
+      exit 4
+    fi
+  fi
+done
 
 ###############################################################################
 # Show info
@@ -105,8 +167,16 @@ echo
 echo "==== Navidrome bootstrap - summary ===="
 echo "Mode:                       ${MODE}"
 echo "Navidrome music path:       ${NAVIDROME_MUSIC_PATH}"
-echo "Microservice volume paths:  ${VOLUMES_PATH}"
+echo "Microservice volume paths:  ${VOLUMES_PATH:-<not set>}"
 echo "Script directory:           ${SCRIPT_DIR}"
+if [[ ${#PORT_VARS[@]} -gt 0 ]]; then
+  echo "Discovered *_PORT variables:"
+  for pv in "${PORT_VARS[@]}"; do
+    printf "  - %s=%s\n" "$pv" "${!pv:-<unset>}"
+  done
+else
+  echo "No *_PORT variables detected in environment."
+fi
 echo "======================================"
 echo
 
@@ -177,15 +247,10 @@ CUSTOM_METRICS_PATH="/metrics-${RAN_SUFFIX}"
 info "Generated CUSTOM_METRICS_PATH=${CUSTOM_METRICS_PATH}"
 
 ###############################################################################
-# Template expansion helper
+# Template expansion helper (dynamic PORT placeholder handling)
 # - we will only render the two config files: configs/prometheus.yml and configs/Caddyfile
-# - first we replace the custom placeholders (e.g. <custom_metrics_path>, <domain>, <navidrome_port>, <prometheus_port>, <cadvisor_port>, <node_exporter_port>, <grafana_port>)
-#   with ${VAR} style placeholders, then we expand environment variables.
-#
-# Expansion strategy:
-# 1) Prefer envsubst if available.
-# 2) Else use perl (recommended fallback).
-# 3) Else final fallback: use a safe-ish eval echo per-line expansion (only as last resort).
+# - dynamically build sed replacements for all discovered *_PORT variables
+# - also always replace <custom_metrics_path> and <domain>
 ###############################################################################
 TMP_FILES_CREATED=0
 TMP_FILES=()
@@ -204,16 +269,29 @@ expand_vars_file() {
   # copy source to tmp
   cp -a "$src" "$tmp"
 
-  # Replace angle-bracket placeholders with ${VAR} so expansion works
-  sed -i.bak \
-    -e 's|<custom_metrics_path>|${CUSTOM_METRICS_PATH}|g' \
-    -e 's|<navidrome_port>|${NAVIDROME_PORT}|g' \
-    -e 's|<prometheus_port>|${PROMETHEUS_PORT}|g' \
-    -e 's|<cadvisor_port>|${CADVISOR_PORT}|g' \
-    -e 's|<node_exporter_port>|${NODE_EXPORTER_PORT}|g' \
-    -e 's|<domain>|${DOMAIN}|g' \
-    -e 's|<grafana_port>|${GRAFANA_PORT}|g' \
-    "$tmp" && rm -f "${tmp}.bak" || true
+  # Build sed arguments dynamically
+  # Start with known placeholders
+  sed_args=()
+  sed_args+=( -e "s|<custom_metrics_path>|\\\${CUSTOM_METRICS_PATH}|g" )
+  sed_args+=( -e "s|<domain>|\\\${DOMAIN}|g" )
+
+  # For each discovered PORT var, add a replacement
+  for pv in "${PORT_VARS[@]:-}"; do
+    # lowercase placeholder name (PROMETHEUS_PORT -> prometheus_port)
+    lc="$(echo "$pv" | tr '[:upper:]' '[:lower:]')"
+    # replacement should be literal ${VAR} so later envsubst/perl expands it
+    replacement='\${'"$pv"'}'
+    # add sed -e "s|<prometheus_port>|${PROMETHEUS_PORT}|g"
+    sed_args+=( -e "s|<${lc}>|${replacement}|g" )
+  done
+
+  # Also include any other env-based placeholders you want (grafana_port etc) if present
+  if [[ -n "${GRAFANA_PORT:-}" ]]; then
+    sed_args+=( -e "s|<grafana_port>|\\\${GRAFANA_PORT}|g" )
+  fi
+
+  # Apply sed replacements in-place (create .bak then remove)
+  sed -i.bak "${sed_args[@]}" "$tmp" && rm -f "${tmp}.bak" || true
 
   # 1) Try envsubst
   if command -v envsubst >/dev/null 2>&1; then
@@ -231,8 +309,6 @@ expand_vars_file() {
   fi
 
   # 3) Final fallback: line-by-line eval expansion.
-  # NOTE: using eval is potentially risky if template contains untrusted content.
-  # We only use it as last resort on user-controlled local files.
   warn "envsubst and perl not found; falling back to line-by-line eval expansion for $src"
   : > "$dst"
   while IFS= read -r line || [[ -n "$line" ]]; do
