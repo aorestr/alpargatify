@@ -9,30 +9,31 @@
 }
 
 ## Add http:// as a prefix for each item for testing
-
-# Navidrome
 navidrome.<domain> {
     reverse_proxy navidrome:4533
 }
 
-# WUD
 wud.<domain> {
     route {
         reverse_proxy wud:2999
     }
 }
 
-# Grafana
 grafana.<domain> {
     route {
         reverse_proxy grafana:3000
     }
 }
 
-# Syncthing
 syncthing.<domain> {
     route {
         reverse_proxy syncthing:8384
+    }
+}
+
+filebrowser.<domain> {
+    route {
+        reverse_proxy filebrowser:8080
     }
 }
 

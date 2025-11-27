@@ -6,11 +6,11 @@ set -eu
 : "${FOLDER_ID:=}"
 : "${FOLDER_LABEL:=Navidrome Library}"
 : "${CONFIG_HOME:=/var/syncthing/config}"
-: "${MUSIC_PATH:=/var/syncthing/music}"
+: "${MUSIC_PATH:=/srv/music}"
 
 mkdir -p "$CONFIG_HOME"
-# optional: try to set ownership if running as root with PUID/PGID env handling done elsewhere
-# chown -R "${PUID:-0}:${PGID:-0}" "$CONFIG_HOME" || true
+# optionally set perms here if needed:
+chown -R "${PUID:-0}:${PGID:-0}" "$CONFIG_HOME" || true
 
 # 1) generate base config if missing
 if [ ! -f "$CONFIG_HOME/config.xml" ]; then
@@ -61,6 +61,64 @@ EOF
   echo "Injected folder block into config.xml."
 fi
 
-# 5) Exec Syncthing in foreground (use --home explicitly; avoid background dance)
+# 4b) Update GUI user/password if both GUI_USER and GUI_PASSWORD are provided.
+# We generate a temp config (using syncthing itself) to obtain the correctly hashed password,
+# then replace the <gui>...</gui> block in the real config.xml. This preserves the rest.
+if [ -n "$GUI_USER" ] && [ -n "$GUI_PASSWORD" ]; then
+  echo "Ensuring GUI user/password in config.xml match env vars..."
+  # extract current GUI user (if any) so we can skip work if unchanged
+  CURRENT_GUI_USER=$(sed -n 's:.*<user>\(.*\)</user>.*:\1:p' "$CONFIG_XML" || true)
+
+  # If username equals desired and there is a password tag, we still update because password changed.
+  # We'll always create a temp config and copy the <gui> block to ensure password hash matches.
+  TMP_HOME="$(mktemp -d)"
+  trap 'rm -rf "$TMP_HOME"' EXIT INT TERM
+
+  echo "Generating a temporary config to produce hashed password..."
+  syncthing generate --home "$TMP_HOME" --gui-user="$GUI_USER" --gui-password="$GUI_PASSWORD"
+
+  TMP_CONFIG="$TMP_HOME/config.xml"
+  if [ ! -f "$TMP_CONFIG" ]; then
+    echo "Error: temporary config generation failed." >&2
+  else
+    # extract <gui>...</gui> block from temporary config
+    # This sed approach takes everything from <gui ...> to </gui> (inclusive)
+    TMP_GUI_BLOCK="$(awk '/<gui/{flag=1} flag{print} /<\/gui>/{flag=0}' "$TMP_CONFIG" || true)"
+
+    if [ -z "$TMP_GUI_BLOCK" ]; then
+      echo "Warning: couldn't extract <gui> block from generated config; skipping GUI update." >&2
+    else
+      # If real config contains a <gui> block, replace it. Otherwise insert before </configuration>
+      if grep -q "<gui" "$CONFIG_XML"; then
+        # Use awk to replace the first <gui>...</gui> block with the new one.
+        TMP="$(mktemp)"
+        awk -v newblock="$TMP_GUI_BLOCK" '
+          BEGIN {inside=0; replaced=0}
+          /<gui/ && !replaced {inside=1; print newblock; replaced=1; next}
+          /<\/gui>/ && inside {inside=0; next}
+          { if (!inside) print }
+        ' "$CONFIG_XML" > "$TMP" && mv "$TMP" "$CONFIG_XML"
+        echo "Replaced existing <gui> block in config.xml with new credentials."
+      else
+        # Insert the new <gui> block before </configuration>
+        TMP="$(mktemp)"
+        awk -v newblock="$TMP_GUI_BLOCK" '{
+          if ($0 ~ /<\/configuration>/ && !inserted) {
+            print newblock
+            inserted=1
+          }
+          print
+        }' "$CONFIG_XML" > "$TMP" && mv "$TMP" "$CONFIG_XML"
+        echo "Inserted <gui> block into config.xml with new credentials."
+      fi
+    fi
+  fi
+
+  # cleanup temp dir (trap will also clean)
+  rm -rf "$TMP_HOME" || true
+  trap - EXIT INT TERM
+fi
+
+# 5) Exec Syncthing in foreground (use --home explicitly)
 echo "Starting syncthing (foreground) with --home ${CONFIG_HOME} ..."
 exec syncthing --home "$CONFIG_HOME"

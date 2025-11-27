@@ -809,7 +809,8 @@
   "refresh": "30m",
   "schemaVersion": 40,
   "tags": [
-    "prometheus"
+    "wud",
+    "ms"
   ],
   "templating": {
     "list": [

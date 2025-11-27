@@ -184,7 +184,7 @@ fi
 
 # Show which secrets are present without printing their values
 echo "Secrets present:"
-for s in WUD_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD SFTP_PASSWORD SYNCTHING_GUI_PASSWORD; do
+for s in WUD_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD SFTP_PASSWORD SYNCTHING_GUI_PASSWORD FILEBROWSER_ADMIN_PASSWORD; do
   if [[ -n "${!s:-}" ]]; then
     echo "  - ${s}=<set>"
   else

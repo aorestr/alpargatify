@@ -2530,7 +2530,8 @@
   "schemaVersion": 41,
   "tags": [
     "http",
-    "caddy"
+    "caddy",
+    "ms"
   ],
   "templating": {
     "list": [
