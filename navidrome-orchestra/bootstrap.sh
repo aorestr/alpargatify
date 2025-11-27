@@ -106,6 +106,9 @@ MODE="up" # values: up (default), down
 ENABLE_WUD=1
 ENABLE_EXTRA_STORAGE=1
 ENABLE_MONITORING=1
+# - local: default behavior, <protocol>="http", ddclient (profile "prod") NOT enabled
+# - prod:  production behavior, <protocol>="https", ddclient (profile "prod") will be enabled
+PROD_MODE=0   # 0=local, 1=prod
 
 usage() {
   cat <<EOF
@@ -131,6 +134,7 @@ POSITIONAL=()
 while (( "$#" )); do
   case "$1" in
     --down) MODE="down"; shift ;;
+    --prod) PROD_MODE=1; shift ;; 
     --no-wud) ENABLE_WUD=0; shift ;;
     --no-extra-storage) ENABLE_EXTRA_STORAGE=0; shift ;;
     --no-monitoring) ENABLE_MONITORING=0; shift ;;
@@ -214,6 +218,31 @@ for pv in "${PORT_VARS[@]:-}"; do
     fi
   fi
 done
+
+###############################################################################
+# Determine protocol based on PROD_MODE (local vs prod)
+###############################################################################
+if [[ $PROD_MODE -eq 1 ]]; then
+  PROTOCOL="https"
+else
+  PROTOCOL="http"
+fi
+export PROTOCOL
+info "Running in $( [[ $PROD_MODE -eq 1 ]] && echo "PROD" || echo "LOCAL" ) mode. Protocol=${PROTOCOL}"
+
+# Cloudflare token requirement: only mandatory in prod mode
+if [[ $PROD_MODE -eq 1 ]]; then
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    err "CLOUDFLARE_API_TOKEN must be set in .env when running with --prod. Exiting."
+    exit 8
+  fi
+  # Do not print token; export for templating
+  export CLOUDFLARE_API_TOKEN
+  info "CLOUDFLARE_API_TOKEN is present (hidden)."
+else
+  info "CLOUDFLARE_API_TOKEN not required in local mode."
+fi
+
 
 ###############################################################################
 # Show info (avoid printing secrets)
@@ -414,8 +443,8 @@ expand_vars_file() {
   sed_args=()
   sed_args+=( -e "s|<custom_metrics_path>|\\\${CUSTOM_METRICS_PATH}|g" )
   sed_args+=( -e "s|<domain>|\\\${DOMAIN}|g" )
-
-  # Ensure WUD and Navidrome placeholders are available for replacement
+  sed_args+=( -e "s|<protocol>|\\\${PROTOCOL}|g" )
+  sed_args+=( -e "s|<cloudflare_api_token>|\\\${CLOUDFLARE_API_TOKEN}|g" )
   sed_args+=( -e "s|<wud_admin_user>|\\\${WUD_ADMIN_USER}|g" )
   sed_args+=( -e "s|<wud_admin_password>|\\\${WUD_ADMIN_PASSWORD}|g" )
   sed_args+=( -e "s|<navidrome_metrics_password>|\\\${NAVIDROME_METRICS_PASSWORD}|g" )
@@ -497,6 +526,26 @@ else
 fi
 
 ###############################################################################
+# Render configs/ddclient/ddclient.conf in prod -> overwrite original (so container sees the real token)
+# NOTE: only render if running in prod (we don't want to inject token in local)
+###############################################################################
+DDCLIENT_SRC="$SCRIPT_DIR/configs/ddclient.conf"
+DDCLIENT_DST="$SCRIPT_DIR/configs/ddclient.conf.custom"
+if [[ $PROD_MODE -eq 1 && -f "$DDCLIENT_SRC" ]]; then
+  info "Rendering ddclient.conf for production (injecting CLOUDFLARE_API_TOKEN)"
+  if ! expand_vars_file "$DDCLIENT_SRC" "$DDCLIENT_DST"; then
+    warn "Failed to render ddclient.conf; leaving original as-is"
+  else
+    # Ensure the rendered file is read-only to avoid accidental token leak via edits
+    chmod 600 "$DDCLIENT_DST" || true
+    info "Rendered $DDCLIENT_DST"
+  fi
+else
+  info "Skipping ddclient.conf rendering (local mode or file missing)"
+fi
+
+
+###############################################################################
 # Determine docker compose availability and create a compose() wrapper
 # This avoids branching on every invocation.
 ###############################################################################
@@ -556,6 +605,9 @@ if [[ $SUPPORTS_PROFILE -eq 1 ]]; then
   fi
   if [[ $ENABLE_MONITORING -eq 1 ]]; then
     PROFILE_ARGS+=( --profile monitoring )
+  fi
+  if [[ $PROD_MODE -eq 1 ]]; then
+    PROFILE_ARGS+=( --profile prod )
   fi
 fi
 

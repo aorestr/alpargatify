@@ -19,3 +19,21 @@ services:
         aliases:
           - caddy-admin
     restart: unless-stopped
+  
+  ddclient:
+    image: linuxserver/ddclient:4.0.0
+    profiles: ["prod"]
+    container_name: ddclient
+    labels:
+      - 'wud.tag.include=^\d+\.\d+\.\d+$'
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ./configs/ddclient.conf.custom:/config/ddclient.conf:ro
+      # Optional runtime logs/cache (persisted)
+      - ${VOLUMES_PATH}/ddclient:/data:rw
+    networks:
+      - internal
+    restart: unless-stopped
+
