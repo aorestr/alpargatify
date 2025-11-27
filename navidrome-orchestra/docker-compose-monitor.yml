@@ -11,8 +11,8 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
-      - ./configs/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yaml
-      - ./configs/grafana-dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml
+      - ./configs/grafana-datasources.yml:/etc/grafana/provisioning/datasources/provisioner.yaml
+      - ./configs/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/provisioner.yaml
       - ${VOLUMES_PATH}/grafana:/var/lib/grafana
       - ./grafana-dashboards:/var/lib/grafana/dashboards
     networks:
@@ -64,9 +64,13 @@ services:
       - --prometheus_endpoint=${CUSTOM_METRICS_PATH}
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:rw
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
+      - /var/run:/var/run:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /dev/disk/:/dev/disk
+    devices: 
+      - /dev/kmsg
     networks:
       - frontend
       - monitoring
