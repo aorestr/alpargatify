@@ -9,16 +9,84 @@
 # Modes:
 #   Default: bring services up (compose up -d)
 #   --down : stop services (compose down)
-
+#
+# Profiles (compose):
+#   By default the script will ENABLE all known profiles so profile-tagged services are started.
+#   Known profiles (as of this script): "extra-storage", "wud", "monitoring"
+#
+#   You can selectively DISABLE any of those profiles using flags:
+#     --no-wud             : disable the "wud" profile
+#     --no-extra-storage   : disable the "extra-storage" profile
+#     --no-monitoring      : disable the "monitoring" profile
+#
+#   Behavior:
+#     - Default behavior: all three profiles are enabled and any service in those profiles
+#       will be started.
+#     - If you pass e.g. --no-wud, no services that belong to the "wud" profile will be
+#       started. If you pass multiple --no-* flags, the corresponding profiles will be
+#       disabled (for example `--no-extra-storage --no-monitoring` will prevent any service
+#       in either "extra-storage" or "monitoring" from starting).
+#
+#   Implementation notes:
+#     - The script will pass --profile NAME to the compose up command for each enabled profile
+#       when the compose implementation supports it. If the compose binary does not support
+#       profiles, the script will warn and continue (services without profiles will still start).
+#
+# Examples:
+#   $(basename "$0")
+#   $(basename "$0") --down
+#   $(basename "$0") --no-wud --no-monitoring
+#
 set -euo pipefail
 IFS=$'\n\t'
 
 ###############################################################################
-# Helpers
+# Colors (portable-ish): red for error, orange-ish for warn if possible
 ###############################################################################
-err()   { echo "ERROR: $*" >&2; }
-info()  { echo "INFO: $*"; }
-warn()  { echo "WARN: $*" >&2; }
+_init_colors() {
+  RED=""
+  ORANGE=""
+  RESET=""
+
+  # Prefer tput when available for reset
+  if command -v tput >/dev/null 2>&1; then
+    RESET="$(tput sgr0 2>/dev/null || true)"
+  else
+    RESET=$'\033[0m'
+  fi
+
+  # Detect 256-color capable terminals (TERM contains 256color)
+  if [[ "${TERM:-}" == *256color* ]]; then
+    # Orange-like (color 208)
+    ORANGE=$'\033[38;5;208m'
+    RED=$'\033[31m'
+  else
+    # Fallback to tput setaf or basic ANSI
+    if command -v tput >/dev/null 2>&1; then
+      RED="$(tput setaf 1 2>/dev/null || true)"
+      ORANGE="$(tput setaf 3 2>/dev/null || true)"
+      # If tput failed return empty, fall back to ANSI
+      [ -z "$RED" ] && RED=$'\033[31m'
+      [ -z "$ORANGE" ] && ORANGE=$'\033[33m'
+    else
+      RED=$'\033[31m'
+      ORANGE=$'\033[33m'
+    fi
+  fi
+
+  # If stderr not a terminal, disable colors to keep logs clean
+  if [[ ! -t 2 ]]; then
+    RED=""
+    ORANGE=""
+    RESET=""
+  fi
+}
+
+_init_colors
+time_stamp() { date +"%Y-%m-%d %H:%M:%S"; }
+err()  { printf '%s %sERROR:%s %s\n' "$(time_stamp)" "$RED" "$RESET" "$*" >&2; }
+warn() { printf '%s %sWARN:%s %s\n'  "$(time_stamp)" "$ORANGE" "$RESET" "$*" >&2; }
+info() { printf '%s INFO: %s\n' "$(time_stamp)" "$*"; }
 
 cleanup_tmpfiles() {
   if [[ "${TMP_FILES_CREATED:-}" == "1" ]]; then
@@ -30,21 +98,32 @@ cleanup_tmpfiles() {
 trap cleanup_tmpfiles EXIT
 
 ###############################################################################
-# Parse args (only mode flags)
+# Parse args (only mode flags + profile disable flags)
 ###############################################################################
 MODE="up" # values: up (default), down
 
+# Profile enable flags (defaults: enabled)
+ENABLE_WUD=1
+ENABLE_EXTRA_STORAGE=1
+ENABLE_MONITORING=1
+
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [--down] [-h|--help]
+Usage: $(basename "$0") [--down] [--no-wud] [--no-extra-storage] [--no-monitoring] [-h|--help]
 
 Modes:
   (default)         : bring services up (docker compose up -d)
   --down            : stop services (docker compose down)
 
+Profile control (defaults: all enabled):
+  --no-wud          : disable the "wud" profile (services in this profile will not be started)
+  --no-extra-storage: disable the "extra-storage" profile
+  --no-monitoring   : disable the "monitoring" profile
+
 Examples:
   $(basename "$0")
   $(basename "$0") --down
+  $(basename "$0") --no-wud --no-monitoring
 EOF
 }
 
@@ -52,6 +131,9 @@ POSITIONAL=()
 while (( "$#" )); do
   case "$1" in
     --down) MODE="down"; shift ;;
+    --no-wud) ENABLE_WUD=0; shift ;;
+    --no-extra-storage) ENABLE_EXTRA_STORAGE=0; shift ;;
+    --no-monitoring) ENABLE_MONITORING=0; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*) echo "Unknown option: $1" >&2; usage; exit 2 ;;
@@ -81,24 +163,92 @@ set +a
 # Required variables (basic validation)
 ###############################################################################
 : "${DOMAIN:?"DOMAIN is not set in .env"}"
-: "${NAVIDROME_VERSION:?"NAVIDROME_VERSION is not set in .env"}"
 : "${NAVIDROME_MUSIC_PATH:?"NAVIDROME_MUSIC_PATH is not set in .env"}"
-: "${NAVIDROME_PORT:?"NAVIDROME_PORT is not set in .env"}"
-: "${GRAFANA_PORT:?"GRAFANA_PORT is not set in .env"}"
-: "${PROMETHEUS_PORT:?"PROMETHEUS_PORT is not set in .env"}"
-: "${CADVISOR_PORT:?"CADVISOR_PORT is not set in .env"}"
-: "${NODE_EXPORTER_PORT:?"NODE_EXPORTER_PORT is not set in .env"}"
+
+if [ -z "${SFTP_USER:-}" ] ||  [ -z "${SFTP_PASSWORD:-}" ]; then
+  err "SFTP_USER and SFTP_PASSWORD must be set in .env. Exiting."
+  exit 3
+fi
+
+if [ -z "${WUD_ADMIN_USER:-}" ] || [ -z "${WUD_ADMIN_PASSWORD:-}" ] && [ $ENABLE_WUD -eq 1 ]; then
+  warn "WUD_ADMIN_USER and WUD_ADMIN_PASSWORD must be set in .env. Exiting."
+  exit 3
+fi
+
+if [ -z "${GRAFANA_ADMIN_USER:-}" ] || [ -z "${GRAFANA_ADMIN_PASSWORD:-}" ] && [ $ENABLE_MONITORING -eq 1 ]; then
+  warn "GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must be set in .env. Exiting."
+  exit 3
+fi
+
+if [ -z "${SYNCTHING_GUI_USER:-}" ] || [ -z "${SYNCTHING_GUI_PASSWORD:-}" ] && [ $ENABLE_EXTRA_STORAGE -eq 1 ]; then
+  warn "SYNCTHING_GUI_USER and SYNCTHING_GUI_PASSWORD must be set in .env. Exiting."
+  exit 3
+fi
+
+if [ -z "${FILEBROWSER_ADMIN_USER:-}" ] || [ -z "${FILEBROWSER_ADMIN_PASSWORD:-}" ] && [ $ENABLE_EXTRA_STORAGE -eq 1 ]; then
+  warn "GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD must be set in .env. Exiting."
+  exit 3
+fi
 
 ###############################################################################
-# Show info
+# Collect and validate all *_PORT variables dynamically
+# - builds PORT_VARS array containing variable names (e.g. PROMETHEUS_PORT)
+# - optionally validates they are non-empty and numeric
+###############################################################################
+PORT_VARS=()
+while IFS='=' read -r name _; do
+  if [[ "$name" =~ _PORT$ ]]; then
+    PORT_VARS+=("$name")
+  fi
+done < <(env)
+
+for pv in "${PORT_VARS[@]:-}"; do
+  val="${!pv:-}"
+  if [[ -z "$val" ]]; then
+    warn "Port var $pv is empty or not set."
+  else
+    # basic numeric check
+    if ! [[ "$val" =~ ^[0-9]+$ ]]; then
+      err "Port variable $pv has a non-numeric value: '$val'. Ports must be numeric."
+      exit 4
+    fi
+  fi
+done
+
+###############################################################################
+# Show info (avoid printing secrets)
 ###############################################################################
 echo
 echo "==== Navidrome bootstrap - summary ===="
 echo "Mode:                       ${MODE}"
-echo "Navidrome version:          ${NAVIDROME_VERSION}"
 echo "Navidrome music path:       ${NAVIDROME_MUSIC_PATH}"
-echo "Microservice volume paths:  ${VOLUMES_PATH}"
+echo "Microservice volume paths:  ${VOLUMES_PATH:-<not set>}"
 echo "Script directory:           ${SCRIPT_DIR}"
+if [[ ${#PORT_VARS[@]} -gt 0 ]]; then
+  echo "Discovered *_PORT variables:"
+  for pv in "${PORT_VARS[@]}"; do
+    printf "  - %s=%s\n" "$pv" "${!pv:-<unset>}"
+  done
+else
+  echo "No *_PORT variables detected in environment."
+fi
+
+# Show which secrets are present without printing their values
+echo "Secrets present:"
+for s in WUD_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD SFTP_PASSWORD SYNCTHING_GUI_PASSWORD FILEBROWSER_ADMIN_PASSWORD; do
+  if [[ -n "${!s:-}" ]]; then
+    echo "  - ${s}=<set>"
+  else
+    echo "  - ${s}=<not set>"
+  fi
+done
+
+# show profile enablement
+echo "Compose profiles (defaults: enabled):"
+printf "  - extra-storage: %s\n" "$( [[ $ENABLE_EXTRA_STORAGE -eq 1 ]] && echo "enabled" || echo "disabled" )"
+printf "  - wud          : %s\n" "$( [[ $ENABLE_WUD -eq 1 ]] && echo "enabled" || echo "disabled" )"
+printf "  - monitoring   : %s\n" "$( [[ $ENABLE_MONITORING -eq 1 ]] && echo "enabled" || echo "disabled" )"
+
 echo "======================================"
 echo
 
@@ -120,6 +270,7 @@ if [[ ! -d "$VOLUMES_PATH" ]]; then
 else
   info "Volumes directory exists: $VOLUMES_PATH"
 fi
+export VOLUMES_PATH
 # Path where the backgrounds for Navidrome login page are saved
 BACKGROUNDS_PATH="${BACKGROUNDS_PATH:-$SCRIPT_DIR/backgrounds}"
 if [[ ! -d "$BACKGROUNDS_PATH" ]]; then
@@ -128,6 +279,7 @@ if [[ ! -d "$BACKGROUNDS_PATH" ]]; then
 else
   info "Backgrounds directory exists: $BACKGROUNDS_PATH"
 fi
+export BACKGROUNDS_PATH
 
 ###############################################################################
 # Extract numeric uid/gid for both paths and ensure they match
@@ -170,15 +322,75 @@ export CUSTOM_METRICS_PATH
 info "Generated CUSTOM_METRICS_PATH=${CUSTOM_METRICS_PATH}"
 
 ###############################################################################
-# Template expansion helper
+# Generate Navidrome metrics password (random) and export it
+# - This is used in configs/prometheus.yml for the navidrome job's basic_auth
+# - We do not print the password to logs
+###############################################################################
+generate_random_password() {
+  # try openssl for secure random; fallback to hex from /dev/urandom
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -base64 12
+  else
+    od -An -N12 -tx1 /dev/urandom | tr -d ' \n' | cut -c1-16
+  fi
+}
+
+NAVIDROME_METRICS_PASSWORD="$(generate_random_password)"
+export NAVIDROME_METRICS_PASSWORD
+info "Generated NAVIDROME_METRICS_PASSWORD (hidden)."
+
+###############################################################################
+# Generate Htpasswd-compliant hash for WUD_ADMIN_PASSWORD and export it
+# - Preferred: openssl passwd -apr1 (Apache MD5)
+# - Fallback: use htpasswd (bcrypt) if available
+###############################################################################
+generate_htpasswd_hash() {
+  local user="$1"; local pass="$2"; local hash=""
+
+  # 1) openssl passwd -apr1 -> Apache MD5 ($apr1$...)
+  if command -v openssl >/dev/null 2>&1; then
+    if hash="$(openssl passwd -apr1 "$pass" 2>/dev/null)"; then
+      echo "$hash"
+      return 0
+    fi
+  fi
+
+  # 2) htpasswd (apache tools) -> bcrypt with -B
+  if command -v htpasswd >/dev/null 2>&1; then
+    # htpasswd -nbB user pass  prints: user:$2y$...
+    hash_line="$(htpasswd -nbB "$user" "$pass" 2>/dev/null || true)"
+    # extract after colon
+    hash="${hash_line#*:}"
+    if [[ -n "$hash" ]]; then
+      echo "$hash"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+# Create the hashed password and export
+if [[ -n "${WUD_ADMIN_PASSWORD:-}" ]]; then
+  WUD_ADMIN_PASSWORD_HASH="$(generate_htpasswd_hash "$WUD_ADMIN_USER" "$WUD_ADMIN_PASSWORD" || true)"
+  if [[ -z "${WUD_ADMIN_PASSWORD_HASH:-}" ]]; then
+    err "Failed to generate htpasswd-compliant hash for WUD_ADMIN_PASSWORD. Ensure 'htpasswd' or 'openssl' or 'python3' is available."
+    exit 5
+  fi
+  export WUD_ADMIN_PASSWORD_HASH
+  info "Generated WUD_ADMIN_PASSWORD_HASH (hidden)."
+
+else
+  err "WUD_ADMIN_PASSWORD is empty; cannot generate hash."
+  exit 3
+fi
+
+###############################################################################
+# Template expansion helper (dynamic PORT placeholder handling)
 # - we will only render the two config files: configs/prometheus.yml and configs/Caddyfile
-# - first we replace the custom placeholders (e.g. <custom_metrics_path>, <domain>, <navidrome_port>, <prometheus_port>, <cadvisor_port>, <node_exporter_port>, <grafana_port>)
-#   with ${VAR} style placeholders, then we expand environment variables.
-#
-# Expansion strategy:
-# 1) Prefer envsubst if available.
-# 2) Else use perl (recommended fallback).
-# 3) Else final fallback: use a safe-ish eval echo per-line expansion (only as last resort).
+# - dynamically build sed replacements for all discovered *_PORT variables
+# - also always replace <custom_metrics_path> and <domain>
+# - also ensure <wud_admin_user>, <wud_admin_password>, <navidrome_metrics_password> are replaced
 ###############################################################################
 TMP_FILES_CREATED=0
 TMP_FILES=()
@@ -197,16 +409,33 @@ expand_vars_file() {
   # copy source to tmp
   cp -a "$src" "$tmp"
 
-  # Replace angle-bracket placeholders with ${VAR} so expansion works
-  sed -i.bak \
-    -e 's|<custom_metrics_path>|${CUSTOM_METRICS_PATH}|g' \
-    -e 's|<navidrome_port>|${NAVIDROME_PORT}|g' \
-    -e 's|<prometheus_port>|${PROMETHEUS_PORT}|g' \
-    -e 's|<cadvisor_port>|${CADVISOR_PORT}|g' \
-    -e 's|<node_exporter_port>|${NODE_EXPORTER_PORT}|g' \
-    -e 's|<domain>|${DOMAIN}|g' \
-    -e 's|<grafana_port>|${GRAFANA_PORT}|g' \
-    "$tmp" && rm -f "${tmp}.bak" || true
+  # Build sed arguments dynamically
+  # Start with known placeholders
+  sed_args=()
+  sed_args+=( -e "s|<custom_metrics_path>|\\\${CUSTOM_METRICS_PATH}|g" )
+  sed_args+=( -e "s|<domain>|\\\${DOMAIN}|g" )
+
+  # Ensure WUD and Navidrome placeholders are available for replacement
+  sed_args+=( -e "s|<wud_admin_user>|\\\${WUD_ADMIN_USER}|g" )
+  sed_args+=( -e "s|<wud_admin_password>|\\\${WUD_ADMIN_PASSWORD}|g" )
+  sed_args+=( -e "s|<navidrome_metrics_password>|\\\${NAVIDROME_METRICS_PASSWORD}|g" )
+
+  # For each discovered PORT var, add a replacement
+  for pv in "${PORT_VARS[@]:-}"; do
+    # lowercase placeholder name (PROMETHEUS_PORT -> prometheus_port)
+    lc="$(echo "$pv" | tr '[:upper:]' '[:lower:]')"
+    # replacement should be literal ${VAR} so later envsubst/perl expands it
+    replacement='\${'"$pv"'}'
+    sed_args+=( -e "s|<${lc}>|${replacement}|g" )
+  done
+
+  # Also include any other env-based placeholders you want (grafana_port etc) if present
+  if [[ -n "${GRAFANA_PORT:-}" ]]; then
+    sed_args+=( -e "s|<grafana_port>|\\\${GRAFANA_PORT}|g" )
+  fi
+
+  # Apply sed replacements in-place (create .bak then remove)
+  sed -i.bak "${sed_args[@]}" "$tmp" && rm -f "${tmp}.bak" || true
 
   # 1) Try envsubst
   if command -v envsubst >/dev/null 2>&1; then
@@ -224,8 +453,6 @@ expand_vars_file() {
   fi
 
   # 3) Final fallback: line-by-line eval expansion.
-  # NOTE: using eval is potentially risky if template contains untrusted content.
-  # We only use it as last resort on user-controlled local files.
   warn "envsubst and perl not found; falling back to line-by-line eval expansion for $src"
   : > "$dst"
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -283,6 +510,21 @@ else
 fi
 info "Compose command wrapper is ready."
 
+# Check whether the compose implementation supports --profile for 'up'
+SUPPORTS_PROFILE=0
+if compose help up 2>&1 | grep -q -- '--profile'; then
+  SUPPORTS_PROFILE=1
+else
+  # try a generic help check if previous failed (some implementations differ)
+  if compose --help 2>&1 | grep -q -- '--profile'; then
+    SUPPORTS_PROFILE=1
+  fi
+fi
+
+if [[ $SUPPORTS_PROFILE -eq 0 ]]; then
+  warn "Compose implementation does not advertise '--profile' support; profile control flags will be ignored. Services without profiles will still start."
+fi
+
 ###############################################################################
 # Gather docker-compose files (we will NOT render them; pass original files)
 ###############################################################################
@@ -301,18 +543,21 @@ for f in "${compose_ymls[@]}"; do
 done
 
 ###############################################################################
-# Export env vars for compose
+# Build profile args for 'compose up' when applicable
+# Default: enable all known profiles unless explicitly disabled by flags.
 ###############################################################################
-export NAVIDROME_MUSIC_PATH
-export VOLUMES_PATH
-export BACKGROUNDS_PATH
-export DOMAIN
-export CUSTOM_METRICS_PATH
-export NAVIDROME_PORT
-export GRAFANA_PORT
-export PROMETHEUS_PORT
-export CADVISOR_PORT
-export NODE_EXPORTER_PORT
+PROFILE_ARGS=()
+if [[ $SUPPORTS_PROFILE -eq 1 ]]; then
+  if [[ $ENABLE_EXTRA_STORAGE -eq 1 ]]; then
+    PROFILE_ARGS+=( --profile extra-storage )
+  fi
+  if [[ $ENABLE_WUD -eq 1 ]]; then
+    PROFILE_ARGS+=( --profile wud )
+  fi
+  if [[ $ENABLE_MONITORING -eq 1 ]]; then
+    PROFILE_ARGS+=( --profile monitoring )
+  fi
+fi
 
 ###############################################################################
 # Invoke compose with selected mode using original compose files
@@ -321,10 +566,17 @@ info "Invoking docker compose mode: ${MODE}"
 
 if [[ "$MODE" == "up" ]]; then
   # Force recreate so we make sure configuration stays correct
-  compose "${compose_args[@]}" up -d --force-recreate	
+  # We include PROFILE_ARGS only for 'up' if supported; down doesn't need profiles
+  if [[ ${#PROFILE_ARGS[@]} -gt 0 ]]; then
+    info "Enabled compose profiles: $(printf '%s ' "${PROFILE_ARGS[@]}")"
+  else
+    info "No compose profiles will be passed (either disabled or unsupported)."
+  fi
+
+  compose "${compose_args[@]}" "${PROFILE_ARGS[@]:-}" up -d --force-recreate --remove-orphans
   EXIT_CODE=$?
 elif [[ "$MODE" == "down" ]]; then
-  compose "${compose_args[@]}" down
+  compose "${compose_args[@]}" "${PROFILE_ARGS[@]:-}" down --remove-orphans
   EXIT_CODE=$?
 else
   err "Unknown MODE: $MODE"
@@ -337,4 +589,3 @@ if [[ $EXIT_CODE -ne 0 ]]; then
 fi
 
 info "Compose command finished successfully."
-info "Prometheus will scrape on path: ${CUSTOM_METRICS_PATH}"

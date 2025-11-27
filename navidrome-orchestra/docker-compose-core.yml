@@ -1,25 +1,34 @@
 services:
   navidrome:
-    image: deluan/navidrome:${NAVIDROME_VERSION}
+    image: deluan/navidrome:0.58.5
     container_name: navidrome
+    labels:
+      - 'wud.tag.include=^\d+\.\d+\.\d+$'
     user: ${PUID}:${PGID}
-    ports:
-      - "4533:${NAVIDROME_PORT}"
     environment:
-      ND_PORT: ${NAVIDROME_PORT}
       ND_CONFIGFILE: /data/navidrome.toml
       ND_LASTFM_APIKEY: ${LASTFM_APIKEY}
       ND_LASTFM_SECRET: ${LASTFM_SECRET}
       ND_PROMETHEUS_METRICSPATH: ${CUSTOM_METRICS_PATH}
+      ND_PROMETHEUS_PASSWORD: ${NAVIDROME_METRICS_PASSWORD}
+      ND_UILOGINBACKGROUNDURL: /backgrounds
     volumes:
       - "${NAVIDROME_MUSIC_PATH}:/music:ro"
       - "${VOLUMES_PATH}/navidrome:/data"
       - "./configs/navidrome.toml:/data/navidrome.toml:ro"
-      - "${BACKGROUNDS_PATH}:/data/backgrounds:ro"
+      - "${BACKGROUNDS_PATH}:/backgrounds:ro"
     networks:
-      - navidrome
+      - frontend
+      - monitoring
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget --quiet --tries=1 --timeout=3 -O - http://127.0.0.1:4533/ || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
 
 networks:
-  navidrome:
-    driver: bridge
+  internal:
+  frontend:
+  monitoring:
+  caddy-with-admin:

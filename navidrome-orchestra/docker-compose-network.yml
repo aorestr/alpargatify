@@ -2,6 +2,8 @@ services:
   caddy:
     image: caddy:2.10
     container_name: caddy
+    labels:
+      - 'wud.tag.include=^\d+\.\d+$'
     volumes:
       - ./configs/Caddyfile.custom:/etc/caddy/Caddyfile:ro
       - ${VOLUMES_PATH}/caddy/data:/data
@@ -10,5 +12,10 @@ services:
       - "80:80"
       - "443:443"
     networks:
-      - navidrome
+      frontend:
+      caddy-with-admin:
+        # This enable Prometheus to access the admin endpoint
+        # without exposing it to anyone else
+        aliases:
+          - caddy-admin
     restart: unless-stopped

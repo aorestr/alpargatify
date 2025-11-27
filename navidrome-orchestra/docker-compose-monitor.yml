@@ -2,9 +2,10 @@ services:
 
   grafana:
     image: grafana/grafana:12.3
+    profiles: ["monitoring"]
     container_name: grafana
-    ports:
-      - "3005:${GRAFANA_PORT}"
+    labels:
+      - 'wud.tag.include=^\d+\.\d+$'
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
@@ -12,57 +13,78 @@ services:
     volumes:
       - ./configs/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yaml
       - ./configs/grafana-dashboard.yaml:/etc/grafana/provisioning/dashboards/main.yaml
-      - ./grafana-dashboards:/var/lib/grafana/dashboards
       - ${VOLUMES_PATH}/grafana:/var/lib/grafana
+      - ./grafana-dashboards:/var/lib/grafana/dashboards
     networks:
-      - navidrome
+      - frontend
+      - monitoring
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget --quiet --tries=1 --timeout=3 -O - http://127.0.0.1:3000/ || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
 
   prometheus:
     image: prom/prometheus:v3.7.3
+    profiles: ["monitoring"]
     container_name: prometheus
+    labels:
+      - 'wud.tag.include=^v\d+\.\d+\.\d+$'
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=5d'
-      - '--storage.tsdb.retention.size=10GB'
-      - '--storage.tsdb.min-block-duration=1h'
-      - '--storage.tsdb.max-block-duration=12h'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'
-    ports:
-      - "9090:${PROMETHEUS_PORT}"
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=5d
+      - --storage.tsdb.retention.size=10GB
+      - --storage.tsdb.min-block-duration=1h
+      - --storage.tsdb.max-block-duration=12h
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --web.console.templates=/etc/prometheus/consoles
+      - --web.enable-lifecycle
     volumes:
       - ./configs/prometheus.yml.custom:/etc/prometheus/prometheus.yml:ro
       - ${VOLUMES_PATH}/prometheus:/prometheus
     networks:
-      - navidrome
+      - monitoring
+      - caddy-with-admin
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget --quiet --tries=1 --timeout=3 -O - http://127.0.0.1:9090/ || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.0
+    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    profiles: ["monitoring"]
     container_name: cadvisor
+    labels:
+      - 'wud.tag.include=^v\d+\.\d+\.\d+$'
     command:
       - --prometheus_endpoint=${CUSTOM_METRICS_PATH}
-    ports:
-      - "8080:${CADVISOR_PORT}"
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:rw                # Only works with rw permissions
+      - /var/run:/var/run:rw
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
     networks:
-      - navidrome
+      - frontend
+      - monitoring
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget --quiet --tries=1 --timeout=3 -O - http://127.0.0.1:8080/ || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
 
   node-exporter:
     image: prom/node-exporter:v1.10.2
+    profiles: ["monitoring"]
     container_name: node-exporter
+    labels:
+      - 'wud.tag.include=^v\d+\.\d+\.\d+$'
     command:
       - --web.telemetry-path=${CUSTOM_METRICS_PATH}
-    ports:
-      - 9100:${NODE_EXPORTER_PORT}
     networks:
-      - navidrome
+      - monitoring
     restart: unless-stopped

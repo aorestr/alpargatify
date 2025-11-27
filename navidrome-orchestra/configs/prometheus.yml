@@ -5,20 +5,33 @@ global:
 
 scrape_configs:
 
-  # Navidrome: replace the metrics_path to match ND_PROMETHEUS_METRICSPATH you set
   - job_name: 'navidrome'
     metrics_path: <custom_metrics_path>
     static_configs:
-      - targets: ['navidrome:<navidrome_port>']
+      - targets: ['navidrome:4533']
+    basic_auth:
+      username: 'navidrome'
+      password: '<navidrome_metrics_password>'
 
-  # cAdvisor (container metrics)
+  - job_name: 'wud'
+    metrics_path: /metrics  # Sadly fixed
+    static_configs:
+      - targets: ['wud:2999']
+    basic_auth:
+      username: '<wud_admin_user>'
+      password: '<wud_admin_password>'
+
   - job_name: 'cadvisor'
     metrics_path: <custom_metrics_path>
     static_configs:
-      - targets: ['cadvisor:<cadvisor_port>']
+      - targets: ['cadvisor:8080']
 
-  # node-exporter (host metrics)
   - job_name: 'node'
     metrics_path: <custom_metrics_path>
     static_configs:
-      - targets: ['node-exporter:<node_exporter_port>']
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'caddy'
+    metrics_path: /metrics  # Admin API must be enabled to edit I think 
+    static_configs:
+      - targets: ['caddy-admin:2019']
