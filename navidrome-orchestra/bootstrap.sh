@@ -410,7 +410,7 @@ generate_htpasswd_hash() {
 if [[ -n "${WUD_ADMIN_PASSWORD:-}" ]]; then
   WUD_ADMIN_PASSWORD_HASH="$(generate_htpasswd_hash "$WUD_ADMIN_USER" "$WUD_ADMIN_PASSWORD" || true)"
   if [[ -z "${WUD_ADMIN_PASSWORD_HASH:-}" ]]; then
-    err "Failed to generate htpasswd-compliant hash for WUD_ADMIN_PASSWORD. Ensure 'htpasswd' or 'openssl' or 'python3' is available."
+    err "Failed to generate htpasswd-compliant hash for WUD_ADMIN_PASSWORD. Ensure 'htpasswd' or 'openssl' is available."
     exit 5
   fi
   export WUD_ADMIN_PASSWORD_HASH

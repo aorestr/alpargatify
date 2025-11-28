@@ -51,36 +51,9 @@ services:
       - caddy-with-admin
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl --fail http://127.0.0.1:9090/-/ready >/dev/null 2>&1 || exit 1"]
+      test: ["CMD", "sh", "-c", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
       interval: 30s
       timeout: 5s
-      retries: 3
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
-    profiles: ["monitoring"]
-    container_name: cadvisor
-    labels:
-      - 'wud.tag.include=^v\d+\.\d+\.\d+$'
-    command:
-      - --prometheus_endpoint=${CUSTOM_METRICS_PATH}
-    volumes:
-      - /:/rootfs:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /var/run:/var/run:rw
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /dev/disk/:/dev/disk
-    devices: 
-      - /dev/kmsg
-    networks:
-      - frontend
-      - monitoring
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "sh", "-c", "wget --quiet --tries=1 --timeout=3 -O - http://127.0.0.1:8080/ || exit 1"]
-      interval: 1m
-      timeout: 10s
       retries: 3
 
   node-exporter:
