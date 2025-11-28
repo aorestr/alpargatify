@@ -51,7 +51,7 @@ services:
       - caddy-with-admin
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "sh", "-c", "curl --fail http://127.0.0.1:9090/-/ready >/dev/null 2>&1 || exit 1"]
+      test: ["CMD", "sh", "-c", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
