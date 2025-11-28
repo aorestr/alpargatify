@@ -106,9 +106,11 @@ MODE="up" # values: up (default), down
 ENABLE_WUD=1
 ENABLE_EXTRA_STORAGE=1
 ENABLE_MONITORING=1
-# - local: default behavior, <protocol>="http", ddclient (profile "prod") NOT enabled
-# - prod:  production behavior, <protocol>="https", ddclient (profile "prod") will be enabled
+# - local: default behavior, <protocol>="http"
+# - prod:  production behavior, <protocol>="https"
 PROD_MODE=0   # 0=local, 1=prod
+# If 1, enables ddclient
+DINAMIC_IP=0
 
 usage() {
   cat <<EOF
@@ -122,6 +124,8 @@ Profile control (defaults: all enabled):
   --no-wud          : disable the "wud" profile (services in this profile will not be started)
   --no-extra-storage: disable the "extra-storage" profile
   --no-monitoring   : disable the "monitoring" profile
+  --prod            : Caddy starts using HTTPS
+  --dinamic-ip      : Use DDClient for dinamic IPs resolution. Needs to be enabled with "--prod"
 
 Examples:
   $(basename "$0")
@@ -135,6 +139,7 @@ while (( "$#" )); do
   case "$1" in
     --down) MODE="down"; shift ;;
     --prod) PROD_MODE=1; shift ;; 
+    --dinamic-ip) DINAMIC_IP=1; shift ;; 
     --no-wud) ENABLE_WUD=0; shift ;;
     --no-extra-storage) ENABLE_EXTRA_STORAGE=0; shift ;;
     --no-monitoring) ENABLE_MONITORING=0; shift ;;
@@ -231,18 +236,20 @@ export PROTOCOL
 info "Running in $( [[ $PROD_MODE -eq 1 ]] && echo "PROD" || echo "LOCAL" ) mode. Protocol=${PROTOCOL}"
 
 # Cloudflare token requirement: only mandatory in prod mode
-if [[ $PROD_MODE -eq 1 ]]; then
-  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-    err "CLOUDFLARE_API_TOKEN must be set in .env when running with --prod. Exiting."
-    exit 8
+if [[ $DINAMIC_IP -eq 1 ]]; then
+  if [[ $PROD_MODE -eq 1 ]]; then
+    if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+      err "CLOUDFLARE_API_TOKEN must be set in .env when running with --dinamic-ip. Exiting."
+      exit 8
+    fi
+    # Do not print token; export for templating
+    export CLOUDFLARE_API_TOKEN
+    info "CLOUDFLARE_API_TOKEN is present (hidden)."
+  else
+    err "--prod must be enable when using --dinamic-ip."
+    exit 4
   fi
-  # Do not print token; export for templating
-  export CLOUDFLARE_API_TOKEN
-  info "CLOUDFLARE_API_TOKEN is present (hidden)."
-else
-  info "CLOUDFLARE_API_TOKEN not required in local mode."
 fi
-
 
 ###############################################################################
 # Show info (avoid printing secrets)
@@ -444,7 +451,7 @@ expand_vars_file() {
   sed_args+=( -e "s|<custom_metrics_path>|\\\${CUSTOM_METRICS_PATH}|g" )
   sed_args+=( -e "s|<domain>|\\\${DOMAIN}|g" )
   sed_args+=( -e "s|<protocol>|\\\${PROTOCOL}|g" )
-  sed_args+=( -e "s|<cloudflare_api_token>|\\\${CLOUDFLARE_API_TOKEN}|g" )
+  sed_args+=( -e "s|<cloudflare_api_token>|\\\${CLOUDFLARE_API_TOKEN:-}|g" )
   sed_args+=( -e "s|<wud_admin_user>|\\\${WUD_ADMIN_USER}|g" )
   sed_args+=( -e "s|<wud_admin_password>|\\\${WUD_ADMIN_PASSWORD}|g" )
   sed_args+=( -e "s|<navidrome_metrics_password>|\\\${NAVIDROME_METRICS_PASSWORD}|g" )
@@ -526,24 +533,24 @@ else
 fi
 
 ###############################################################################
-# Render configs/ddclient/ddclient.conf in prod -> overwrite original (so container sees the real token)
-# NOTE: only render if running in prod (we don't want to inject token in local)
+# Render configs/ddclient.conf for dinamic IPs environments
 ###############################################################################
-DDCLIENT_SRC="$SCRIPT_DIR/configs/ddclient.conf"
-DDCLIENT_DST="$SCRIPT_DIR/configs/ddclient.conf.custom"
-if [[ $PROD_MODE -eq 1 && -f "$DDCLIENT_SRC" ]]; then
-  info "Rendering ddclient.conf for production (injecting CLOUDFLARE_API_TOKEN)"
-  if ! expand_vars_file "$DDCLIENT_SRC" "$DDCLIENT_DST"; then
-    warn "Failed to render ddclient.conf; leaving original as-is"
+if [[ $DINAMIC_IP -eq 1 ]]; then
+  DDCLIENT_SRC="$SCRIPT_DIR/configs/ddclient.conf"
+  DDCLIENT_DST="$SCRIPT_DIR/configs/ddclient.conf.custom"
+  if [[ -f "$DDCLIENT_SRC" ]]; then
+    info "Rendering ddclient.conf for production (injecting CLOUDFLARE_API_TOKEN)"
+    if ! expand_vars_file "$DDCLIENT_SRC" "$DDCLIENT_DST"; then
+      warn "Failed to render ddclient.conf; leaving original as-is"
+    else
+      # Ensure the rendered file is read-only to avoid accidental token leak via edits
+      chmod 600 "$DDCLIENT_DST" || true
+      info "Rendered $DDCLIENT_DST"
+    fi
   else
-    # Ensure the rendered file is read-only to avoid accidental token leak via edits
-    chmod 600 "$DDCLIENT_DST" || true
-    info "Rendered $DDCLIENT_DST"
+    info "Skipping ddclient.conf rendering (local mode or file missing)"
   fi
-else
-  info "Skipping ddclient.conf rendering (local mode or file missing)"
 fi
-
 
 ###############################################################################
 # Determine docker compose availability and create a compose() wrapper
@@ -608,6 +615,9 @@ if [[ $SUPPORTS_PROFILE -eq 1 ]]; then
   fi
   if [[ $PROD_MODE -eq 1 ]]; then
     PROFILE_ARGS+=( --profile prod )
+  fi
+  if [[ $DINAMIC_IP -eq 1 ]]; then
+    PROFILE_ARGS+=( --profile dinamic-ip )
   fi
 fi
 
