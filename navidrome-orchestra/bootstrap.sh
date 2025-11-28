@@ -593,7 +593,8 @@ if [[ ${#compose_ymls[@]} -eq 0 ]]; then
   exit 7
 fi
 
-compose_args=()
+COMPOSE_PROJECT="navidrome-orchestra"
+compose_args=(-p $COMPOSE_PROJECT)
 for f in "${compose_ymls[@]}"; do
   compose_args+=(-f "$f")
 done
