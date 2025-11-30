@@ -47,7 +47,8 @@ Examples:
 ## `flac-to-aac.sh` (converter) behavior
 - Source -> destination: preserves the source directory tree under the destination root and converts each `.flac` to a same-relative-location `.m4a` file.
 - Default encoder: **afconvert** with reasonable defaults (e.g. 192 kbps AAC). Override options with the `AF_OPTS` environment variable.
-- Metadata: if **metaflac** and **AtomicParsley** are present, the script attempts to copy tags and cover art into the `.m4a` files. If not present, conversion still proceeds but metadata copying is limited.
+- Metadata: if **metaflac** and **AtomicParsley** are present, the script attempts to copy tags and cover art into the `.m4a` files. If not present, conversion still proceeds but metadata copying is limited. You can install those tools with `brew install flac atomicparsley`.
+- If the source files are saved as image instead of tracks, the program will try to split it. You need **xld**.
 - Flags supported:
 	- `--dry-run`: show the `afconvert` commands without executing them (keeps the temporary output for inspection and avoids cleanup)
 	- `--force`: overwrite existing destination files (equivalent to `SKIP_EXISTING=no`)

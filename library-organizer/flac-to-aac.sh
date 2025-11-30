@@ -158,6 +158,14 @@ if [ -n "$MISSING_META_TOOLS" ]; then
   warn "metadata copying will be skipped or limited because the following tools are missing:$MISSING_META_TOOLS"
 fi
 
+# Check for XLD (for splitting images using CUE)
+XLD_PRESENT="no"
+if command -v xld >/dev/null 2>&1; then
+  XLD_PRESENT="yes"
+else
+  warn "XLD not found. Cue-based splitting will be skipped; single-file conversion only."
+fi
+
 # Sanity checks
 if [ ! -d "$SRC" ]; then
   err "source directory does not exist: $SRC"
@@ -191,7 +199,125 @@ info "  DRY_RUN:       $DRY_RUN"
 info "  VERBOSE:       $VERBOSE"
 info ""
 
-# Convert .flac files
+# Helper: convert a single audio file to m4a using afconvert (used for both single .flac and split tracks)
+# Arguments:
+#   $1 = input file path
+#   $2 = destination directory (already created)
+convert_to_m4a() {
+  local in_file="$1"
+  local out_dir="$2"
+  local base="$(basename "$in_file")"
+  local name="${base%.*}"
+  local out_file="$out_dir/$name.m4a"
+
+  if [ -e "$out_file" ]; then
+    if [ "$SKIP_EXISTING" = "yes" ]; then
+      debug "Skipping (exists): $out_file"
+      return 0
+    else
+      rm -f "$out_file" || { warn "could not remove existing $out_file"; return 1; }
+    fi
+  fi
+
+  info "Converting: ${in_file#$SRC/} -> ${out_file#$DEST/}"
+  if [ "$DRY_RUN" = "yes" ]; then
+    # Print safe, human-readable command (single line)
+    printf '  -> DRY RUN: afconvert'
+    for tok in "${AF_ARGS[@]}"; do printf ' %s' "$tok"; done
+    printf ' %q %q\n' "$in_file" "$out_file"
+    return 0
+  fi
+
+  # assemble command array (array preserves tokenization)
+  local cmd=(afconvert)
+  if [ "${#AF_ARGS[@]}" -gt 0 ]; then
+    cmd+=( "${AF_ARGS[@]}" )
+  fi
+  cmd+=( "$in_file" "$out_file" )
+
+  debug "Running: $(printf '%s ' "${cmd[@]}" | sed -E 's/[[:space:]]+$//')"
+
+  if "${cmd[@]}"; then
+    # metadata copy (best-effort; non-fatal)
+    if command -v metaflac >/dev/null 2>&1 && command -v AtomicParsley >/dev/null 2>&1; then
+      # Try to read tags from source if it's FLAC; otherwise skip metaflac read.
+      case "${in_file##*/}" in
+        *.flac|*.FLAC)
+          TMPD2="$(mktemp -d 2>/dev/null || mktemp -d -t flac2aac_tmp 2>/dev/null || true)"
+          if [ -n "$TMPD2" ]; then
+            metafile="$TMPD2/meta.txt"
+            ap_args=()
+            if metaflac --export-tags-to="$metafile" "$in_file" 2>/dev/null; then
+              while IFS= read -r line || [ -n "$line" ]; do
+                [ -z "$line" ] && continue
+                key="${line%%=*}"
+                val="${line#*=}"
+                case "$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')" in
+                  TITLE) ap_args+=( --title "$val" ) ;;
+                  ARTIST) ap_args+=( --artist "$val" ) ;;
+                  ALBUM) ap_args+=( --album "$val" ) ;;
+                  TRACKNUMBER) ap_args+=( --tracknum "$val" ) ;;
+                  DATE|YEAR) ap_args+=( --year "$val" ) ;;
+                  GENRE) ap_args+=( --genre "$val" ) ;;
+                  COMMENT) ap_args+=( --comment "$val" ) ;;
+                  ALBUMARTIST) ap_args+=( --albumArtist "$val" ) ;;
+                  COMPOSER) ap_args+=( --composer "$val" ) ;;
+                  DISCNUMBER) ap_args+=( --disk "$val" ) ;;
+                esac
+              done < "$metafile"
+
+              picfile="$TMPD2/cover"
+              if metaflac --export-picture-to="$picfile" "$in_file" 2>/dev/null; then
+                if command -v file >/dev/null 2>&1; then
+                  ftype=$(file --brief --mime-type "$picfile" 2>/dev/null || echo "image/jpeg")
+                  case "$ftype" in
+                    image/png) picfile_ext="${picfile}.png" ;;
+                    image/jpeg) picfile_ext="${picfile}.jpg" ;;
+                    image/*) picfile_ext="${picfile}.img" ;;
+                    *) picfile_ext="${picfile}.jpg" ;;
+                  esac
+                  mv "$picfile" "$picfile_ext" 2>/dev/null || true
+                else
+                  picfile_ext="${picfile}.jpg"
+                  mv "$picfile" "$picfile_ext" 2>/dev/null || true
+                fi
+                ap_args+=( --artwork "$picfile_ext" )
+              fi
+
+              if [ "${#ap_args[@]}" -gt 0 ]; then
+                debug "Applying metadata with AtomicParsley: $(printf '%s ' "${ap_args[@]}" | sed -E 's/[[:space:]]+$//')"
+                if AtomicParsley "$out_file" "${ap_args[@]}" --overWrite >/dev/null 2>&1; then
+                  debug "Metadata written to $out_file"
+                else
+                  warn "AtomicParsley failed to write metadata to $out_file"
+                fi
+              fi
+            fi
+            # cleanup
+            if [ -n "$TMPD2" ] && [ -d "$TMPD2" ]; then
+              rm -rf "$TMPD2" || true
+            fi
+          fi
+          ;;
+        *)
+          # For non-FLAC sources (e.g. WAV produced by XLD), don't attempt metaflac read.
+          debug "Input not FLAC; skipping metaflac-based metadata copy for $in_file"
+          ;;
+      esac
+    else
+      debug "metaflac or AtomicParsley not available; skipping metadata copy for $out_file"
+    fi
+
+    info "  -> OK"
+    return 0
+  else
+    err "  -> ERROR converting $in_file"
+    [ -e "$out_file" ] && rm -f "$out_file"
+    return 1
+  fi
+}
+
+# Convert .flac files (and .flac images with cue -> split to tracks via XLD)
 # Use find -print0 and a while loop in same shell (avoid piping into while which creates subshell)
 while IFS= read -r -d '' srcfile; do
   # compute relative path
@@ -211,6 +337,76 @@ while IFS= read -r -d '' srcfile; do
   mkdir -p "$destdir" || { warn "could not create $destdir"; continue; }
   destfile="$destdir/$name.m4a"
 
+  # === NEW: detect CUE sheet that represents "image" / single-file album ===
+  # Two cases to detect a cue for this .flac:
+  # 1) a file named "<orig>.flac.cue" exists next to the .flac
+  # 2) a file named "<orig_without_ext>.cue" exists next to the .flac
+  cue_candidate1="${srcfile%.flac}.cue"           # e.g. album.flac.cue
+  cue_candidate2="${srcfile}.cue"                 # e.g. album.cue
+  CUE_FILE=""
+  if [ -f "$cue_candidate1" ]; then
+    CUE_FILE="$cue_candidate1"
+    debug "Found cue sheet (case 1): $CUE_FILE"
+  elif [ -f "$cue_candidate2" ]; then
+    CUE_FILE="$cue_candidate2"
+    debug "Found cue sheet (case 2): $CUE_FILE"
+  fi
+
+  if [ -n "$CUE_FILE" ] && [ "$XLD_PRESENT" = "yes" ]; then
+    # We assume this .flac + CUE is an image and must be split into tracks.
+    info "Detected CUE for image: ${relpath} -> splitting into tracks with XLD"
+    # create temp dir per file
+    TMPD="$(mktemp -d 2>/dev/null || mktemp -d -t flac2aac_tmp 2>/dev/null || true)"
+    if [ -z "$TMPD" ]; then
+      warn "could not create temp dir; skipping cue split for $srcfile"
+      # fallback to normal single-file conversion below
+    else
+      # Run XLD in the temp dir so outputs are written there
+      # Use documented CLI: xld -c <cue> -f <format> <audiofile>
+      XLD_LOG="$TMPD/xld.log"
+      debug "Running XLD to split: (cd $TMPD && xld -c $CUE_FILE -f wav $srcfile >$XLD_LOG 2>&1)"
+      if [ "$DRY_RUN" = "yes" ]; then
+        printf '  -> DRY RUN: (cd %s && xld -c %q -f wav %q)\n' "$TMPD" "$CUE_FILE" "$srcfile"
+        # cleanup temp dir
+        rm -rf "$TMPD" || true
+        continue
+      fi
+
+      ( cd "$TMPD" && xld -c "$CUE_FILE" -f wav "$srcfile" >"$XLD_LOG" 2>&1 )
+      XLD_RC=$?
+      if [ $XLD_RC -ne 0 ]; then
+        # include a short excerpt of the XLD log to help debugging (but keep messages brief)
+        if [ -s "$XLD_LOG" ]; then
+          # show last 20 lines of log in debug mode, but always capture a short summary for the warn
+          tail -n 20 "$XLD_LOG" | sed -n '1,20p' > "$XLD_LOG.summary" 2>/dev/null || true
+          warn "XLD failed (exit $XLD_RC) while splitting $CUE_FILE; falling back to single-file conversion for $srcfile. XLD log (last lines):"
+          while IFS= read -r line; do warn "  $line"; done < <(tail -n 10 "$XLD_LOG" 2>/dev/null)
+        else
+          warn "XLD failed (exit $XLD_RC) while splitting $CUE_FILE; no xld.log produced. Falling back to single-file conversion for $srcfile"
+        fi
+        rm -rf "$TMPD" || true
+        # fall through to normal conversion path below
+      else
+        # success: convert each produced track in TMPD
+        find "$TMPD" -maxdepth 1 -type f \( -iname '*.wav' -o -iname '*.flac' -o -iname '*.aiff' -o -iname '*.m4a' -o -iname '*.alac' \) -print0 | while IFS= read -r -d '' trackfile; do
+          convert_to_m4a "$trackfile" "$destdir"
+        done
+
+        # cleanup temp dir
+        rm -rf "$TMPD" || true
+        # continue to next source file
+        continue
+      fi
+    fi
+  elif [ -n "$CUE_FILE" ] && [ "$XLD_PRESENT" = "no" ]; then
+    # CUE exists but XLD not found
+    warn "Found cue sheet for $srcfile but XLD not available; performing regular single-file conversion."
+    # fall through to single-file conversion below
+  fi
+  # === END NEW: CUE detection and splitting ===
+
+  # If we reach here, either no CUE was found or splitting failed/fallback -> perform normal single-file conversion
+
   if [ -e "$destfile" ]; then
     if [ "$SKIP_EXISTING" = "yes" ]; then
       debug "Skipping (exists): $destfile"
@@ -220,95 +416,8 @@ while IFS= read -r -d '' srcfile; do
     fi
   fi
 
-  info "Converting: $relpath -> ${destfile#$DEST/}"
-  if [ "$DRY_RUN" = "yes" ]; then
-    # Print safe, human-readable command (single line)
-    printf '  -> DRY RUN: afconvert'
-    for tok in "${AF_ARGS[@]}"; do printf ' %s' "$tok"; done
-    printf ' %q %q\n' "$srcfile" "$destfile"
-    continue
-  fi
-
-  # assemble command array (array preserves tokenization)
-  cmd=(afconvert)
-  if [ "${#AF_ARGS[@]}" -gt 0 ]; then
-    cmd+=( "${AF_ARGS[@]}" )
-  fi
-  cmd+=( "$srcfile" "$destfile" )
-
-  # create a per-file temporary dir and ensure cleanup for that file only
-  TMPD="$(mktemp -d 2>/dev/null || mktemp -d -t flac2aac_tmp 2>/dev/null || true)"
-  if [ -z "$TMPD" ]; then
-    warn "could not create temp dir; metadata operations may fail"
-  fi
-
-  debug "Running: $(printf '%s ' "${cmd[@]}" | sed -E 's/[[:space:]]+$//')"
-
-  if "${cmd[@]}"; then
-    # metadata copy (best-effort; non-fatal)
-    if command -v metaflac >/dev/null 2>&1 && command -v AtomicParsley >/dev/null 2>&1 && [ -n "$TMPD" ]; then
-      metafile="$TMPD/meta.txt"
-      ap_args=()
-      if metaflac --export-tags-to="$metafile" "$srcfile" 2>/dev/null; then
-        while IFS= read -r line || [ -n "$line" ]; do
-          [ -z "$line" ] && continue
-          key="${line%%=*}"
-          val="${line#*=}"
-          case "$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')" in
-            TITLE) ap_args+=( --title "$val" ) ;;
-            ARTIST) ap_args+=( --artist "$val" ) ;;
-            ALBUM) ap_args+=( --album "$val" ) ;;
-            TRACKNUMBER) ap_args+=( --tracknum "$val" ) ;;
-            DATE|YEAR) ap_args+=( --year "$val" ) ;;
-            GENRE) ap_args+=( --genre "$val" ) ;;
-            COMMENT) ap_args+=( --comment "$val" ) ;;
-            ALBUMARTIST) ap_args+=( --albumArtist "$val" ) ;;
-            COMPOSER) ap_args+=( --composer "$val" ) ;;
-            DISCNUMBER) ap_args+=( --disk "$val" ) ;;
-          esac
-        done < "$metafile"
-
-        picfile="$TMPD/cover"
-        if metaflac --export-picture-to="$picfile" "$srcfile" 2>/dev/null; then
-          if command -v file >/dev/null 2>&1; then
-            ftype=$(file --brief --mime-type "$picfile" 2>/dev/null || echo "image/jpeg")
-            case "$ftype" in
-              image/png) picfile_ext="${picfile}.png" ;;
-              image/jpeg) picfile_ext="${picfile}.jpg" ;;
-              image/*) picfile_ext="${picfile}.img" ;;
-              *) picfile_ext="${picfile}.jpg" ;;
-            esac
-            mv "$picfile" "$picfile_ext" 2>/dev/null || true
-          else
-            picfile_ext="${picfile}.jpg"
-            mv "$picfile" "$picfile_ext" 2>/dev/null || true
-          fi
-          ap_args+=( --artwork "$picfile_ext" )
-        fi
-
-        if [ "${#ap_args[@]}" -gt 0 ]; then
-          debug "Applying metadata with AtomicParsley: $(printf '%s ' "${ap_args[@]}" | sed -E 's/[[:space:]]+$//')"
-          if AtomicParsley "$destfile" "${ap_args[@]}" --overWrite >/dev/null 2>&1; then
-            debug "Metadata written to $destfile"
-          else
-            warn "AtomicParsley failed to write metadata to $destfile"
-          fi
-        fi
-      fi
-    else
-      debug "metaflac or AtomicParsley not available or temp dir missing; skipping metadata copy"
-    fi
-
-    info "  -> OK"
-  else
-    err "  -> ERROR converting $srcfile"
-    [ -e "$destfile" ] && rm -f "$destfile"
-  fi
-
-  # cleanup per-file temp dir
-  if [ -n "$TMPD" ] && [ -d "$TMPD" ]; then
-    rm -rf "$TMPD" || true
-  fi
+  # Normal conversion path for a single .flac file
+  convert_to_m4a "$srcfile" "$destdir"
 
 done < <(find "$SRC" -type f -iname '*.flac' -print0)
 
