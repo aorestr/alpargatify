@@ -3,10 +3,8 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # Config and source path (allow override from environment)
-CONFIG_PATH=${BEETS_CONFIG_PATH:-/config.yaml}
-IMPORT_SRC_PATH=${IMPORT_SRC_PATH:-/import}
-DRY_RUN=${DRY_RUN:-no}
-IMPORT_MODE=${IMPORT_MODE:-full}  # expected values: full, order-only, tag-only
+CONFIG_PATH="/config.yaml"
+IMPORT_SRC_PATH="/import"
 
 # Build base beet command
 BEET_BASE=(beet -c "$CONFIG_PATH")
@@ -29,6 +27,10 @@ BEET_BASE=(beet -c "$CONFIG_PATH")
 # If your beets install uses different flags, adjust these mappings here.
 
 # Compose the final beet import command based on mode and dry run
+if [ "$VERBOSE" = "yes" ]; then
+  # add verbose
+  BEET_CMD+=(-v)
+fi
 BEET_CMD=("${BEET_BASE[@]}" import)
 if [ "$DRY_RUN" = "yes" ]; then
   # pretend mode: just preview

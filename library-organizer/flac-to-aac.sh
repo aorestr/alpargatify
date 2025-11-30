@@ -372,7 +372,7 @@ while IFS= read -r -d '' srcfile; do
         continue
       fi
 
-      ( cd "$TMPD" && xld -c "$CUE_FILE" -f wav "$srcfile" >"$XLD_LOG" 2>&1 )
+      ( cd "$TMPD" && xld -c "$CUE_FILE" -f flac "$srcfile" >"$XLD_LOG" 2>&1 )
       XLD_RC=$?
       if [ $XLD_RC -ne 0 ]; then
         # include a short excerpt of the XLD log to help debugging (but keep messages brief)
@@ -388,7 +388,7 @@ while IFS= read -r -d '' srcfile; do
         # fall through to normal conversion path below
       else
         # success: convert each produced track in TMPD
-        find "$TMPD" -maxdepth 1 -type f \( -iname '*.wav' -o -iname '*.flac' -o -iname '*.aiff' -o -iname '*.m4a' -o -iname '*.alac' \) -print0 | while IFS= read -r -d '' trackfile; do
+        find "$TMPD" -maxdepth 1 -type f \( -iname '*.flac' \) -print0 | while IFS= read -r -d '' trackfile; do
           convert_to_m4a "$trackfile" "$destdir"
         done
 

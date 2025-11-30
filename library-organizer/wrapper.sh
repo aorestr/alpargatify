@@ -237,7 +237,7 @@ info "-> invoking docker compose (beets import)"
 pushd "$SCRIPT_DIR/beets" >/dev/null
 
 # Use --abort-on-container-exit so compose stops after the one-shot service finishes
-compose -f docker-compose.yml up --build --abort-on-container-exit
+VERBOSE=${VERBOSE} compose -f docker-compose.yml up --build --abort-on-container-exit
 EXIT_CODE=$?
 
 popd >/dev/null

@@ -33,14 +33,15 @@ original_date: yes
 
 # Use inline plugin to define the extra variables
 plugins:
-  - inline      # Define custom item fields
-  - albumtypes  # Detect album types and let you edit them
-  - musicbrainz # Extract metadata from MusicBrainz
-  - scrub       # Clean up original metadata
-  - lastgenre   # Guess genre from last.fm tags, needs installation
-  - fetchart    # Download cover for album, needs installation
-  - embedart    # Embed cover in songs, needs installation
-  - lyrics      # Fetch lyrics for songs, needs installation
+  - inline        # Define custom item fields
+  - albumtypes    # Detect album types and let you edit them
+  - musicbrainz   # Extract metadata from MusicBrainz
+  - scrub         # Clean up original metadata
+  - fromfilename  # Help when there's no metadata at first
+  - lastgenre     # Guess genre from last.fm tags, needs installation
+  - fetchart      # Download cover for album, needs installation
+  - embedart      # Embed cover in songs, needs installation
+  - lyrics        # Fetch lyrics for songs, needs installation
 
 item_fields:
   disc_folder: f"Disc {disc:02d}" if disctotal > 1 else ""
