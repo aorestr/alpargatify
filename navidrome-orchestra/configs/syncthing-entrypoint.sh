@@ -78,68 +78,54 @@ else
   echo "Created $BACKUPS_STIGNORE_FILE with .DS_Store ignore pattern."
 fi
 
-# 3a) enerate folder ID for music (always unique)
-MUSIC_FOLDER_LABEL=$(head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n')
-
-# 3b) Generate folder ID for backups (always unique)
+# 3) Create folders
+# Generate unique folder IDs
+MUSIC_FOLDER_ID=$(head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n')
 BACKUPS_FOLDER_ID=$(head -c 20 /dev/urandom | od -An -tx1 | tr -d ' \n')
 
 CONFIG_XML="$CONFIG_HOME/config.xml"
 
-# 4) Check whether config.xml already contains the music folder (idempotent)
-if grep -qE "<folder[^>]+path=[\"']${MUSIC_PATH}[\"']" "$CONFIG_XML" || \
-   grep -qE "<folder[^>]+label=[\"']${FOLDER_LABEL}[\"']" "$CONFIG_XML"; then
-  echo "Music folder already present in config.xml (by path or label) — skipping injection."
-else
-  echo "Adding music folder entry to config.xml (id=$MUSIC_FOLDER_LABEL, path=$MUSIC_PATH, label=$FOLDER_LABEL)."
+# Reusable function to inject a folder block if missing
+add_folder() {
+  local ID="$1"
+  local LABEL="$2"
+  local PATH="$3"
 
-  # Build minimal folder XML block (Syncthing will add local device id automatically)
-  read -r -d '' FOLDER_BLOCK <<EOF || true
-    <folder id="${MUSIC_FOLDER_LABEL}" label="${FOLDER_LABEL}" path="${MUSIC_PATH}" type="sendreceive" rescanIntervalS="3600" fsWatcherEnabled="true" ignorePerms="false" autoNormalize="true">
+  if grep -qE "<folder[^>]+path=[\"']${PATH}[\"']" "$CONFIG_XML" || \
+     grep -qE "<folder[^>]+label=[\"']${LABEL}[\"']" "$CONFIG_XML"; then
+    echo "Folder '$LABEL' already present in config.xml — skipping."
+    return
+  fi
+
+  echo "Adding folder '$LABEL' (id=$ID, path=$PATH)."
+
+  local BLOCK
+  read -r -d '' BLOCK <<EOF || true
+    <folder id="${ID}" label="${LABEL}" path="${PATH}" type="sendreceive"
+            rescanIntervalS="3600" fsWatcherEnabled="true"
+            ignorePerms="false" autoNormalize="true">
       <filesystemType>basic</filesystemType>
     </folder>
 EOF
 
-  # Insert the folder block before the closing </configuration> tag.
-  # Use a safe temp file and atomic move.
+  local TMP
   TMP="$(mktemp)"
-  awk -v block="$FOLDER_BLOCK" '{
+  awk -v block="$BLOCK" '{
     if ($0 ~ /<\/configuration>/ && !inserted) {
       print block
       inserted=1
     }
     print
   }' "$CONFIG_XML" > "$TMP" && mv "$TMP" "$CONFIG_XML"
-  echo "Injected music folder block into config.xml."
-fi
 
-# 4b) Check whether config.xml already contains the backups folder (idempotent)
-if grep -qE "<folder[^>]+path=[\"']${BACKUPS_PATH}[\"']" "$CONFIG_XML" || \
-   grep -qE "<folder[^>]+label=[\"']Navidrome Backups[\"']" "$CONFIG_XML"; then
-  echo "Backups folder already present in config.xml (by path or label) — skipping injection."
-else
-  echo "Adding backups folder entry to config.xml (id=$BACKUPS_FOLDER_ID, path=$BACKUPS_PATH, label=Navidrome Backups)."
+  echo "Inserted folder '$LABEL' into config.xml."
+}
 
-  # Build minimal folder XML block for backups
-  read -r -d '' BACKUPS_FOLDER_BLOCK <<EOF || true
-    <folder id="${BACKUPS_FOLDER_ID}" label="Navidrome Backups" path="${BACKUPS_PATH}" type="sendreceive" rescanIntervalS="3600" fsWatcherEnabled="true" ignorePerms="false" autoNormalize="true">
-      <filesystemType>basic</filesystemType>
-    </folder>
-EOF
+# Add both folders using the same function
+add_folder "$MUSIC_FOLDER_ID" "$MUSIC_FOLDER_LABEL" "$MUSIC_PATH"
+add_folder "$BACKUPS_FOLDER_ID" "$BACKUPS_FOLDER_LABEL" "$BACKUPS_PATH"
 
-  # Insert the folder block before the closing </configuration> tag.
-  TMP="$(mktemp)"
-  awk -v block="$BACKUPS_FOLDER_BLOCK" '{
-    if ($0 ~ /<\/configuration>/ && !inserted) {
-      print block
-      inserted=1
-    }
-    print
-  }' "$CONFIG_XML" > "$TMP" && mv "$TMP" "$CONFIG_XML"
-  echo "Injected backups folder block into config.xml."
-fi
-
-# 4c) Update GUI user/password if both GUI_USER and GUI_PASSWORD are provided.
+# 4) Update GUI user/password if both GUI_USER and GUI_PASSWORD are provided.
 # We generate a temp config (using syncthing itself) to obtain the correctly hashed password,
 # then replace the <gui>...</gui> block in the real config.xml. This preserves the rest.
 # Update GUI user/password if both are provided
@@ -196,7 +182,7 @@ if [ -n "$GUI_USER" ] && [ -n "$GUI_PASSWORD" ]; then
 fi
 
 # ============================================================================
-# 7) START SYNCTHING
+# START SYNCTHING
 # ============================================================================
 
 echo "Starting syncthing (foreground) with --home ${CONFIG_HOME} ..."
