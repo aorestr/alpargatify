@@ -102,7 +102,7 @@ fetchart:
   minwidth: 500             # ignore tiny images (px)
   maxwidth: 1400            # downscale very large images to at most this width (px)
   quality: 75               # JPEG compression quality when downscaling (1-100). 65-75 is a good range.
-  max_filesize: 800000      # attempt to keep downloaded cover <= 800000 bytes (~800 KB)
+  max_filesize: 1200000     # attempt to keep downloaded cover <= 800000 bytes (~800 KB)
   enforce_ratio: 0.5%       # accept images that are approx square (allow small deviation)
   sources:
     - coverart: release     # coverart (Cover Art Archive) by release id first
@@ -113,7 +113,6 @@ fetchart:
   store_source: no          # do not store art source tag (set yes if you want provenance)
   high_resolution: no       # disable extremely high-res images (>20MB risk)
   deinterlace: no           # keep progressive JPEGs by default
-  cover_format: JPEG        # force JPEG output (keeps filesize smaller than PNG)
 
 lyrics:
   sources: [genius, lrclib]
