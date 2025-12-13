@@ -1,12 +1,13 @@
 services:
 
   grafana:
-    image: grafana/grafana:12.3
+    image: grafana/grafana:main
     user: ${PUID}:${PGID}
     profiles: ["monitoring"]
     container_name: grafana
     labels:
-      - 'wud.tag.include=^\d+\.\d+$'
+      - 'wud.tag.include=main'
+      - 'wud.watch.digest=true'
     environment:
       TZ: ${TZ}
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
@@ -33,7 +34,7 @@ services:
     profiles: ["monitoring"]
     container_name: prometheus
     labels:
-      - 'wud.tag.include=^v\d+\.\d+\.\d+$'
+      - 'wud.tag.include=^v\d+\.\d+\.\d+$$'
     environment:
       TZ: ${TZ}
     command:
@@ -64,7 +65,7 @@ services:
     profiles: ["monitoring"]
     container_name: node-exporter
     labels:
-      - 'wud.tag.include=^v\d+\.\d+\.\d+$'
+      - 'wud.tag.include=^v\d+\.\d+\.\d+$$'
     environment:
       TZ: ${TZ}
     command:

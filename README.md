@@ -16,7 +16,6 @@ This is a small collection of tools and orchestrations to run a personal music s
 - **FileBrowser** — web UI for browsing and managing files.
 - **SFTP** — secure file transfer to your music folder.
 - **WUD** — optional web UI to trigger compose actions.
-- **ddclient / Cloudflare** — optional dynamic DNS support.
 - **beets** — tools used in the library-organizer for tagging/organization.
 
 ## Folder overview
@@ -100,7 +99,7 @@ server_setup() {
 	sudo tee /etc/systemd/system/ssh.socket.d/override.conf <<EOF
 [Socket]
 ListenStream=
-ListenStream=$SSH_PORT
+ListenStream=0.0.0.0:$SSH_PORT
 EOF
 	sudo systemctl restart ssh
 

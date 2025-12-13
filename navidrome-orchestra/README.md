@@ -7,7 +7,7 @@ This folder contains the Docker Compose files, configuration templates and helpe
 ## Summary
 - **Core**: `docker-compose-core.yml` — runs **Navidrome** and an init helper to set ownership.
 - **Monitor**: `docker-compose-monitor.yml` — runs **Prometheus**, **Grafana** and **node-exporter** for observability.
-- **Network**: `docker-compose-network.yml` — runs **Caddy** (TLS/HTTP reverse proxy) and, optionally, **ddclient** for dynamic DNS.
+- **Network**: `docker-compose-network.yml` — runs **Caddy** (TLS/HTTP reverse proxy).
 - **Storage / Extras**: `docker-compose-storage.yml` & `docker-compose-extratools.yml` — run **SFTP**, **Syncthing**, **FileBrowser** and **WUD** (web UI for triggers/management).
 - **Bootstrap helper**: `bootstrap.sh` — prepares directories, renders config templates, validates environment and launches the composed services.
 
@@ -38,7 +38,6 @@ Optional but commonly required depending on enabled profiles:
 - `GRAFANA_ADMIN_USER`, `GRAFANA_ADMIN_PASSWORD` — required if monitoring is enabled.
 - `SYNCTHING_GUI_USER`, `SYNCTHING_GUI_PASSWORD` — required if extra-storage profile is enabled.
 - `FILEBROWSER_ADMIN_USER`, `FILEBROWSER_ADMIN_PASSWORD` — required for filebrowser.
-- `CLOUDFLARE_API_TOKEN` — required when using `--dynamic-ip` in `--prod` mode (ddclient).
 
 See the comments in `bootstrap.sh` for additional variable expectations and port names (any env variable that ends with `_PORT` will be validated).
 
@@ -62,7 +61,6 @@ chmod +x ./bootstrap.sh
 ./bootstrap.sh --no-monitoring  	# disable the monitoring profile (Prometheus/Grafana/exports)
 ./bootstrap.sh --no-extra-storage	# disable extra storage services (Syncthing/FileBrowser)
 ./bootstrap.sh --prod     			# run in production mode (Caddy uses https in templates)
-./bootstrap.sh --prod --dynamic-ip 	# enable ddclient dynamic DNS support (requires CLOUDFLARE_API_TOKEN)
 ```
 
 Flags explained:
@@ -71,7 +69,6 @@ Flags explained:
 - `--no-extra-storage`: disable the `extra-storage` profile (disables `syncthing` and `filebrowser`).
 - `--no-monitoring`: disable the `monitoring` profile (disables Prometheus, Grafana, exporters).
 - `--prod`: tells template rendering to use production behavior (sets `PROTOCOL=https` for templates/Caddy).
-- `--dynamic-ip`: enable ddclient dynamic IP support. Only valid when used together with `--prod`; requires `CLOUDFLARE_API_TOKEN` in `.env`.
 - `-h|--help`: prints usage and exits.
 
 Implementation notes about profiles:
@@ -88,7 +85,6 @@ Implementation notes about profiles:
 - **Syncthing** (`docker-compose-storage.yml`, profile `extra-storage`): optional synchronisation service that can mirror music folders between hosts. Two folders are created at its init: one for syncing your music with a remote server and the other to sync the **Navidrome** backups. 
 - **FileBrowser** (`docker-compose-storage.yml`, profile `extra-storage`): web UI for browsing and managing files inside the music folder.
 - **WUD** (`docker-compose-extratools.yml`, profile `wud`): optional management web UI that can trigger docker-compose actions based on the bundled compose files. Useful for remote triggers and scheduled actions — keep it disabled if you do not want remote-trigger abilities.
-- **ddclient** (`docker-compose-network.yml`, profile `dynamic-ip`): optional dynamic DNS client (requires `CLOUDFLARE_API_TOKEN`) for hosts without static IP. This has not been tested, so it might fail.
 
 ## Safety and secrets
 - `bootstrap.sh` validates presence of required secrets in `.env` and will refuse to run or warn when critical secrets are missing for enabled profiles.
@@ -104,9 +100,9 @@ Implementation notes about profiles:
 ```zsh
 ./bootstrap.sh --no-monitoring
 ```
-- Production with HTTPS and dynamic DNS:
+- Production with HTTPS
 ```zsh
-./bootstrap.sh --prod --dynamic-ip
+./bootstrap.sh --prod
 ```
 
 ## Contributing & Issues

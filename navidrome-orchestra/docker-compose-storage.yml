@@ -3,6 +3,9 @@ services:
   sftp:
     image: atmoz/sftp:alpine
     container_name: sftp
+    labels:
+      - 'wud.tag.include=alpine'
+      - 'wud.watch.digest=true'
     command:
       - ${SFTP_USER}:${SFTP_PASSWORD}:${PUID}:${PGID}
     environment:
@@ -21,7 +24,7 @@ services:
     profiles: ["extra-storage"]
     container_name: syncthing
     labels:
-      - 'wud.tag.include=^\d+\.\d+\.\d+$'
+      - 'wud.tag.include=^\d+\.\d+\.\d+$$'
     entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
     environment:
       TZ: ${TZ}
@@ -52,12 +55,12 @@ services:
       retries: 3
 
   filebrowser:
-    image: filebrowser/filebrowser:v2.50.0
+    image: filebrowser/filebrowser:v2.52.0
     user: ${PUID}:${PGID}
     profiles: ["extra-storage"]
     container_name: filebrowser
     labels:
-      - 'wud.tag.include=^v\d+\.\d+\.\d+$'
+      - 'wud.tag.include=^v\d+\.\d+\.\d+$$'
     # Use a custom entrypoint to initialise DB + admin user (mapped below)
     entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
     environment:

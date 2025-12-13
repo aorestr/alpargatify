@@ -467,16 +467,29 @@ convert_to_m4a() {
 #   Exit code 0 if found, 1 if not found
 find_cue_file() {
   local srcfile="$1"
-  # Try filename.cue (e.g., "album.cue" for "album.flac")
-  local cue_candidate1="${srcfile%.flac}.cue"
-  # Try filename.flac.cue (e.g., "album.flac.cue")
+  local base_name="${srcfile%.flac}"
+  
+  # Try multiple CUE file naming patterns:
+  # 1. filename.cue (e.g., "album.cue" for "album.flac")
+  local cue_candidate1="${base_name}.cue"
+  # 2. filename.flac.cue (e.g., "album.flac.cue")
   local cue_candidate2="${srcfile}.cue"
+  # 3. filename FLAC.cue (e.g., "album FLAC.cue" for "album.flac")
+  local cue_candidate3="${base_name} FLAC.cue"
+  # 4. filename flac.cue (lowercase variant)
+  local cue_candidate4="${base_name} flac.cue"
 
   if [ -f "$cue_candidate1" ]; then
     echo "$cue_candidate1"
     return 0
   elif [ -f "$cue_candidate2" ]; then
     echo "$cue_candidate2"
+    return 0
+  elif [ -f "$cue_candidate3" ]; then
+    echo "$cue_candidate3"
+    return 0
+  elif [ -f "$cue_candidate4" ]; then
+    echo "$cue_candidate4"
     return 0
   fi
   

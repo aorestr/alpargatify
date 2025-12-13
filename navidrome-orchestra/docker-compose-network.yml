@@ -5,7 +5,7 @@ services:
     user: ${PUID}:${PGID}
     container_name: caddy
     labels:
-      - 'wud.tag.include=^\d+\.\d+\.\d+$'
+      - 'wud.tag.include=^\d+\.\d+\.\d+$$'
     environment:
       TZ: ${TZ}
     volumes:
@@ -23,24 +23,4 @@ services:
         # without exposing it to anyone else
         aliases:
           - caddy-admin
-    restart: unless-stopped
-  
-  # ddclient has not been tested
-  ddclient:
-    image: linuxserver/ddclient:4.0.0
-    user: ${PUID}:${PGID}
-    profiles: ["dynamic-ip"]
-    container_name: ddclient
-    labels:
-      - 'wud.tag.include=^\d+\.\d+\.\d+$'
-    environment:
-      TZ: ${TZ}
-      PUID: ${PUID}
-      PGID: ${PGID}
-    volumes:
-      - ./configs/ddclient.conf.custom:/config/ddclient.conf:ro
-      # Optional runtime logs/cache (persisted)
-      - ${VOLUMES_PATH}/ddclient:/data:rw
-    networks:
-      - internal
     restart: unless-stopped
