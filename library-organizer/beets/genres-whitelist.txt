@@ -26,6 +26,7 @@ ambient americana
 ambient black metal
 ambient house
 ambient music
+ambient pop
 american primitivism
 americana
 anarcho punk
@@ -590,6 +591,7 @@ glam metal
 glam punk
 glam rock
 glitch
+glitch pop
 gnawa
 go-go
 goa
