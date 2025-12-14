@@ -54,11 +54,12 @@
         - mandopop
         - onkyokei
         - taiwanese pop
-    - fann at-tanbura
-    - fijiri
-    - khaliji
-    - liwa
-    - sawt
+    - middle eastern and persian:
+        - fann at-tanbura
+        - fijiri
+        - khaliji
+        - liwa
+        - sawt
     - south and southeast asian:
         - baila
         - bhangra
@@ -271,7 +272,7 @@
     - disco:
         - cosmic disco
         - disco polo
-            - euro disco
+        - euro disco
         - italo disco
         - nu-disco
         - space disco
@@ -309,7 +310,8 @@
         - crunk
         - electro backbeat
         - electro-grime
-        - electropop
+        - electropop:
+            - poptron
     - electroacoustic:
         - acousmatic music
         - computer music
@@ -405,7 +407,7 @@
         - death industrial
         - electro-industrial
         - post-industrial
-        - electronic body music:
+        - ebm:
             - bubblegum bass
             - deconstructed club
             - futurepop
@@ -472,9 +474,9 @@
         - trap
         - uk bass
 - folk:
-    - apocalyptic folk
     - american folk revival
     - anti-folk
+    - apocalyptic folk
     - british folk revival
     - celtic music
     - chamber folk
@@ -490,7 +492,7 @@
     - sung poetry
     - techno-folk
 - hip hop:
-    - absract hip hop
+    - abstract hip hop
     - alternative hip hop
     - avant-garde hip hop
     - boom bap
@@ -659,7 +661,6 @@
         - groove metal
         - progressive thrash metal
         - teutonic thrash metal
-
 - pop:
     - adult contemporary
     - arab pop
@@ -699,6 +700,57 @@
     - turkish pop
     - vispop
     - wonky pop
+- punk:
+    - punk rock:
+        - anarcho punk:
+            - crust punk:
+                - d-beat
+        - art punk
+        - christian punk
+        - deathrock
+        - deutschpunk
+        - egg punk
+        - folk punk:
+            - celtic punk
+            - gypsy punk
+        - garage punk
+        - grindcore:
+            - crustgrind
+            - noisegrind
+        - hardcore punk:
+            - post-hardcore:
+                - emo:
+                    - emocore
+                    - midwest emo
+                    - screamo
+            - powerviolence
+            - street punk
+            - thrashcore
+        - horror punk
+        - oi!
+        - pop punk
+        - psychobilly
+        - proto-punk
+        - riot grrrl
+        - ska punk:
+            - ska-core
+        - skate punk
+- reggae:
+    - roots reggae
+    - reggae fusion
+    - reggae en español:
+        - spanish reggae
+        - reggae 110
+        - reggae bultrón
+        - romantic flow
+    - lovers rock
+    - raggamuffin:
+        - ragga
+    - dancehall
+    - ska:
+        - 2 tone
+        - rocksteady
+    - dub
 - rhythm and blues:
     - funk:
         - deep funk
@@ -764,63 +816,12 @@
         - freakbeat
         - neo-psychedelia
         - raga rock
-    - punk rock:
-        - anarcho punk:
-            - crust punk:
-                - d-beat
-        - art punk
-        - christian punk
-        - deathrock
-        - deutschpunk
-        - egg punk
-        - folk punk:
-            - celtic punk
-            - gypsy punk
-        - garage punk
-        - grindcore:
-            - crustgrind
-            - noisegrind
-        - hardcore punk:
-            - post-hardcore:
-                - emo:
-                    - emocore
-                    - midwest emo
-                    - screamo
-            - powerviolence
-            - street punk
-            - thrashcore
-        - horror punk
-        - oi!
-        - pop punk
-        - psychobilly
-        - proto-punk
-        - riot grrrl
-        - ska punk:
-            - ska-core
-        - skate punk
     - rock and roll
     - southern rock
     - sufi rock
     - surf rock
     - visual kei:
         - nagoya kei
-- reggae:
-    - roots reggae
-    - reggae fusion
-    - reggae en español:
-        - spanish reggae
-        - reggae 110
-        - reggae bultrón
-        - romantic flow
-    - lovers rock
-    - raggamuffin:
-        - ragga
-    - dancehall
-    - ska:
-        - 2 tone
-        - rocksteady
-    - dub
-- soundtrack:
 - singer-songwriter:
     - cantautorato
     - cantautor
@@ -828,6 +829,7 @@
     - chanson
     - canción de autor
     - nueva canción
+- soundtrack:
 - world:
     - world dub
     - world fusion

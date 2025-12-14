@@ -444,6 +444,7 @@ early music
 east coast blues
 east coast hip hop
 easy listening
+ebm
 electric blues
 electric folk
 electro
@@ -456,7 +457,6 @@ electro-swing
 electroclash
 electrofunk
 electronic art music
-electronic body music
 electronic dance
 electronic luk thung
 electronic music
@@ -1176,6 +1176,7 @@ pop punk
 pop rap
 pop rock
 pop sunda
+poptron
 pornocore
 porro
 post disco
