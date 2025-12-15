@@ -74,8 +74,9 @@ services:
       - ${VOLUMES_PATH}/filebrowser/srv:/srv:rw
       - ${VOLUMES_PATH}/filebrowser/database:/database:rw
       - ${VOLUMES_PATH}/filebrowser/config:/config:rw
-      # the folder FileBrowser should serve (Navidrome music folder)
+      # the folders FileBrowser should serve 
       - ${NAVIDROME_MUSIC_PATH}:/srv/music:rw
+      - ${NAVIDROME_EXTRA_LIBRARIES_PATH}:/srv/extra-libraries:rw
       # custom entrypoint script in your repo (read-only)
       - ./configs/filebrowser-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
     networks:
