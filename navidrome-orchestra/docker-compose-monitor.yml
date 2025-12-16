@@ -29,7 +29,7 @@ services:
       retries: 3
 
   prometheus:
-    image: prom/prometheus:v3.8.0
+    image: prom/prometheus:v3.8.1
     user: ${PUID}:${PGID}
     profiles: ["monitoring"]
     container_name: prometheus
