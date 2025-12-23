@@ -1,60 +1,54 @@
 # Navidrome Telegram Bot
 
-A Python microservice that connects to your Navidrome server (via Subsonic API) and posts daily updates to a Telegram group.
+A lightweight, optimized Telegram bot that integrates with your Navidrome (Subsonic) music server to deliver daily notifications about:
+- **🆕 New Albums**: Albums added to your library in the last 24 hours.
+- **🎂 Anniversaries**: Albums released on this day in history.
 
-## Features
+## Key Features
 
-- **Daily New Albums**: Checks for albums added in the last 24 hours.
-- **On This Day**: Checks for albums released on the current day (matching Day/Month).
-- **Dockerized**: Fully containerized with Docker and Docker Compose.
-- **Secure**: Uses Docker Secrets for sensitive information.
+- **Incremental Synchronization**: Efficiently caches your library and only fetches detailed metadata for new albums, drastically reducing API load and execution time.
+- **Rich Notifications**: Sends beautifully formatted messages with album artist, year, and genre tags.
+- **Smart Date Parsing**: correctly handles various date formats from Navidrome/Subsonic API to ensure accurate anniversary detection.
+- **Dockerized**: Easy to deploy with Docker Compose and Docker Secrets for security.
 
-## Technology
+## Setup & Deployment
 
-- **Language**: Python 3.12
-- **Libraries**: `requests` (API), `schedule` (Job timing)
-- **Container**: Docker (Alpine/Slim based)
+### 1. Secrets Configuration
+Create a `secrets/` directory in the project root and add the following files (no extensions):
 
-## Setup
+| File Name | Content |
+|-----------|---------|
+| `navidrome_url` | Your Navidrome server URL (e.g., `https://music.example.com`) |
+| `navidrome_user` | Your Navidrome username |
+| `navidrome_password` | Your Navidrome password (or hex-encoded password + salt if using legacy auth, but plain password works with modern clients) |
+| `telegram_bot_token` | The token obtained from @BotFather |
+| `telegram_chat_id` | The Chat ID where messages should be sent |
 
-### 1. Secrets
-Create a `secrets` folder in this directory and add the following files with your configuration:
+### 2. Environment Variables
+You can configure the following in `docker-compose.yml`:
 
-- `secrets/navidrome_url.txt`: Full URL to your Navidrome instance (e.g., `https://music.example.com`)
-- `secrets/navidrome_user.txt`: Your Username
-- `secrets/navidrome_password.txt`: Your Password (or Token)
-- `secrets/telegram_bot_token.txt`: Your Telegram Bot API Token
-- `secrets/telegram_chat_id.txt`: The Chat ID (Group or User) to send messages to
+- `LOGGING`: Logging level (e.g., `INFO`, `DEBUG`). Default: `INFO`.
+- `SCHEDULE_TIME`: Time to run the daily check (24h format, HH:MM). Default: `08:00`.
+- `RUN_ON_STARTUP`: Set to `true` to run the check immediately when the container starts (useful for testing).
 
-### 2. Configuration
-Edit `docker-compose.yml` environment variables if needed:
-- `TZ`: Your Timezone (default: `Europe/Madrid`)
-- `SCHEDULE_TIME`: Time to run the check (default: `08:00`)
-- `LOGGING`: Log level (default: `INFO`). Set to `DEBUG` for verbose output.
-- `RUN_ON_STARTUP`: Set to `true` to run a check immediately when the container starts (good for testing).
-
-### 3. Run
+### 3. Run with Docker Compose
 ```bash
-docker-compose up -d --build
+docker-compose up -d
 ```
+The bot will start and schedule the daily job. The `data/` directory is mounted as a volume to persist the album cache, ensuring subsequent runs are fast.
 
-### Caching
-The bot maintains a local cache of your album library using a JSON file in the `data/` directory. This is mapped to the container volume to persist across restarts.
-- **Optimization**: The first run will fetch all albums (which may take time). Subsequent runs (within 24h) use the cache.
-- The `get_new_albums` check always queries the API directly (with optimized pagination) to ensure accuracy.
+## Development
 
-### Verification (Dry Run)
-You can test the connection to Navidrome without sending Telegram messages by running the test script inside the container:
+### Project Structure
+- `src/`: Source code (`main.py`, `navidrome_client.py`, `telegram_sender.py`).
+- `tests/`: Test scripts (`test_navidrome.py`).
+- `data/`: Local cache storage (in container).
+
+### Running Tests
+To verify connectivity and logic without sending real messages to the schedule:
+
 ```bash
+# Run the test script inside the container
 docker-compose run --rm telegram-bot python tests/test_navidrome.py
 ```
-This will run a diagnostic check and print the results to the console.
-
-## How it works
-
-The bot runs a continuous loop using the python `schedule` library.
-1. At 8:00 AM (or configured time), it authenticates with Navidrome using the Subsonic API protocol (establishing a salt and token).
-2. It fetches the list of "newest" albums.
-3. It iterates through your library (paging through albums) to find matches for "Date Released" = Today.
-    - *Note*: This depends on your music files having accurate `releaseDate` or `date` tags that Navidrome has indexed.
-4. If matches are found, it formats an HTML message and sends it to Telegram.
+This script acts as a "speed test" and "functional test", verifying the incremental sync performance and the anniversary detection logic. 

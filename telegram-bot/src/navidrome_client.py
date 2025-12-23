@@ -118,9 +118,11 @@ class NavidromeClient:
         :return: List of enriched album dictionaries.
         """
         cache_file = '/app/data/albums_cache.json'
+        expiry_days = 7
         os.makedirs(os.path.dirname(cache_file), exist_ok=True)
         
         cached_albums: Dict[str, Dict[str, Any]] = {}
+        
         
         # 1. Load Cache (if valid and not forced)
         if not force and os.path.exists(cache_file):
@@ -168,47 +170,81 @@ class NavidromeClient:
         
         new_ids = current_ids - cached_ids
         deleted_ids = cached_ids - current_ids
+
+        # Check for expired items in cache
+        expired_ids = set()
+        if not force:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            for aid, album in cached_albums.items():
+                if aid in deleted_ids: 
+                    continue
+                
+                fetched_at_str = album.get('_fetched_at')
+                is_expired = True # Default to expired if no timestamp
+                
+                if fetched_at_str:
+                    try:
+                        fetched_at = datetime.datetime.fromisoformat(fetched_at_str)
+                        if fetched_at.tzinfo is None:
+                            fetched_at = fetched_at.replace(tzinfo=datetime.timezone.utc)
+                        
+                        age = now - fetched_at
+                        if age.days < expiry_days:
+                            is_expired = False
+                    except ValueError:
+                        pass # Bad format, treat as expired
+                
+                if is_expired:
+                    expired_ids.add(aid)
         
-        logger.info(f"Sync Status: {len(current_api_albums)} total. {len(new_ids)} new. {len(deleted_ids)} deleted.")
+        ids_to_fetch = new_ids.union(expired_ids)
         
-        # 4. Enrich New Albums
+        logger.info(f"Sync Status: {len(current_api_albums)} total. {len(new_ids)} new. {len(deleted_ids)} deleted. {len(expired_ids)} expired.")
+        
+        # 4. Enrich New & Expired Albums
         new_enriched_albums: List[Dict[str, Any]] = []
         
-        if new_ids:
-            logger.info(f"Enriching {len(new_ids)} new albums...")
+        if ids_to_fetch:
+            logger.info(f"Enriching {len(ids_to_fetch)} albums...")
             from concurrent.futures import ThreadPoolExecutor, as_completed
             
             with ThreadPoolExecutor(max_workers=10) as executor:
                 # We need to map future back to ID to know what failed
-                future_to_id = {executor.submit(self._fetch_album_details, aid): aid for aid in new_ids}
+                future_to_id = {executor.submit(self._fetch_album_details, aid): aid for aid in ids_to_fetch}
                 
                 count = 0
-                total = len(new_ids)
+                total = len(ids_to_fetch)
                 
                 for future in as_completed(future_to_id):
                     aid = future_to_id[future]
                     try:
                         details = future.result()
                         if details:
+                            # Add timestamp
+                            details['_fetched_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                             new_enriched_albums.append(details)
                         else:
                             # If fetch fails, try to find the basic info from current_api_albums as fallback
                             fallback = next((a for a in current_api_albums if a['id'] == aid), None)
                             if fallback:
+                                # Even if fallback, we mark it fetched so we don't retry immediately, 
+                                # or maybe we don't? Let's mark it so we try again next time if we don't save _fetched_at?
+                                # Actually, if we stick with fallback, we should probably timestamp it to avoid loops.
+                                fallback['_fetched_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                                 new_enriched_albums.append(fallback)
                     except Exception as e:
                         logger.error(f"Error enriching album {aid}: {e}")
                     
                     count += 1
                     if count % 50 == 0:
-                         logger.info(f"Enriched {count}/{total} new albums...")
+                         logger.info(f"Enriched {count}/{total} albums...")
         
         # 5. Reconstruct Final List and Cache
         final_library: List[Dict[str, Any]] = []
         
-        # Add preserved cached items (excluding deleted)
+        # Add preserved cached items (excluding deleted and expired)
         for aid, album in cached_albums.items():
-            if aid not in deleted_ids:
+            if aid not in deleted_ids and aid not in expired_ids:
                 final_library.append(album)
         
         # Add newly enriched items
