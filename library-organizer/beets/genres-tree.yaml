@@ -132,7 +132,6 @@
         - samba
         - samba rock
         - tecnobrega
-        - tropicalia
         - zouk-lambada
     - calypso
     - chutney
@@ -158,6 +157,7 @@
     - soca
     - son
     - timba
+    - tropical
     - twoubadou
     - zouk
 - classical:
@@ -475,6 +475,15 @@
         - speed garage
         - trap
         - uk bass
+- flamenco:
+    - contemporary flamenco
+    - flamenco fusion
+    - flamenco jazz
+    - flamenco metal
+    - flamenco pop
+    - flamenco rock
+    - nuevo flamenco
+    - rumba
 - folk:
     - american folk revival
     - anti-folk
@@ -615,6 +624,7 @@
 - metal:
     - alternative metal:
         - funk metal
+        - nu metal
         - rap metal
     - black metal:
         - ambient black metal
@@ -674,6 +684,7 @@
     - baroque pop
     - bubblegum pop
     - christian pop
+    - christmas
     - classical crossover
     - europop:
         - austropop
@@ -780,7 +791,6 @@
         - indie rock:
             - slacker rock
         - noise pop
-        - nu metal
         - post-punk revival
         - post-rock:
             - post-metal

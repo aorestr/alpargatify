@@ -5,6 +5,7 @@
 # macOS's native afconvert tool. It supports:
 # - Metadata preservation (via metaflac and AtomicParsley)
 # - CUE sheet splitting (via XLD)
+# - Split-only mode (--split-only flag)
 # - Configurable encoding parameters
 # - Dry-run mode for testing
 
@@ -23,6 +24,7 @@ XLD_PRESENT="no"      # Flag indicating if XLD is available
 SKIP_EXISTING="yes"   # Skip conversion if output file exists
 VERBOSE="no"          # Enable verbose debug output
 DRY_RUN="no"          # Show actions without executing them
+SPLIT_ONLY="no"       # Only split FLAC images, don't convert to AAC
 # Default afconvert arguments: m4af container, AAC codec, 192kbps, quality 127 and VBR_constrained
 DEFAULT_AF_ARGS=( -f m4af -d "aac" -b 192000 -q 127 -s 2 )
 declare -a AF_ARGS  # Array to hold afconvert arguments
@@ -117,22 +119,37 @@ usage() {
 flac-to-aac.sh - convert .flac -> AAC (.m4a) (macOS afconvert)
 
 Usage:
-  $(basename "$0") [--force] [--dry-run] /path/to/source /path/to/destination
+  $(basename "$0") [options] /path/to/source /path/to/destination
 
 Flags:
   -h, --help      show this help and exit
   --force         overwrite existing destination files (equivalent to SKIP_EXISTING=no)
   --dry-run       show actions without running afconvert (equivalent to DRY_RUN=yes)
+  --split-only    only split FLAC images using CUE sheets, output FLAC tracks
+                  (no AAC conversion). Tracks are placed in destination with
+                  same structure as if they were converted to AAC.
 
 Environment:
   AF_OPTS         optional extra afconvert options (whitespace-separated tokens)
                   Example: AF_OPTS='-f mp4f -d "aacf@24000" -b 256000 -q 127' ./flac-to-aac.sh src dest
+                  (ignored when --split-only is used)
   SKIP_EXISTING   ${SKIP_EXISTING}
   VERBOSE         ${VERBOSE}
   DRY_RUN         ${DRY_RUN}
+  SPLIT_ONLY      ${SPLIT_ONLY}
 
-Default encoding (change AF_OPTS to override):
+Default encoding (change AF_OPTS to override, not used with --split-only):
   ${DEFAULT_AF_ARGS[*]}
+
+Examples:
+  # Normal conversion
+  $(basename "$0") /music/flac /music/aac
+
+  # Split FLAC images only, no conversion
+  $(basename "$0") --split-only /music/images /music/split_flac
+
+  # Dry run to see what would happen
+  $(basename "$0") --dry-run --split-only /music/images /music/split_flac
 EOF
 }
 
@@ -149,6 +166,7 @@ EOF
 #   SKIP_EXISTING - Whether to skip existing files
 #   DRY_RUN - Whether to run in dry-run mode
 #   VERBOSE - Whether to enable verbose output
+#   SPLIT_ONLY - Whether to only split without converting
 parse_arguments() {
   declare -a POSITIONAL=()
   local FORCE_FROM_CLI="no"
@@ -159,6 +177,7 @@ parse_arguments() {
       -h|--help) usage; exit 0 ;;
       --force) FORCE_FROM_CLI="yes"; shift ;;
       --dry-run) DRY_RUN="yes"; shift ;;
+      --split-only) SPLIT_ONLY="yes"; shift ;;
       --) shift; break ;;
       -*)
         err "Unknown option: $1"
@@ -191,6 +210,7 @@ parse_arguments() {
   SKIP_EXISTING="$(normalize_bool "$SKIP_EXISTING")"
   DRY_RUN="$(normalize_bool "$DRY_RUN")"
   VERBOSE="$(normalize_bool "$VERBOSE")"
+  SPLIT_ONLY="$(normalize_bool "$SPLIT_ONLY")"
 }
 
 ###############################################################################
@@ -202,10 +222,15 @@ parse_arguments() {
 check_system_requirements() {
   # Verify we're running on macOS
   if [ "$(uname -s)" != "Darwin" ]; then
-    err "afconvert is macOS-only. This script requires macOS (Darwin)."
-    exit 5
-  # Verify afconvert is available
-  elif ! command -v afconvert >/dev/null 2>&1; then
+    if [ "$SPLIT_ONLY" = "yes" ]; then
+      # In split-only mode, we don't need afconvert
+      debug "Not on macOS, but --split-only mode doesn't require afconvert"
+    else
+      err "afconvert is macOS-only. This script requires macOS (Darwin)."
+      exit 5
+    fi
+  # Verify afconvert is available (unless in split-only mode)
+  elif [ "$SPLIT_ONLY" = "no" ] && ! command -v afconvert >/dev/null 2>&1; then
     err "afconvert not found in PATH. Ensure you're on macOS and Xcode (or Command Line Tools) is installed."
     exit 6
   fi
@@ -218,19 +243,22 @@ check_system_requirements() {
 check_optional_tools() {
   MISSING_META_TOOLS=""
   
-  # Check for metaflac (FLAC metadata tool)
-  if ! command -v metaflac >/dev/null 2>&1; then 
-    MISSING_META_TOOLS="$MISSING_META_TOOLS metaflac"
-  fi
-  
-  # Check for AtomicParsley (MP4/M4A metadata tool)
-  if ! command -v AtomicParsley >/dev/null 2>&1; then 
-    MISSING_META_TOOLS="$MISSING_META_TOOLS AtomicParsley"
-  fi
-  
-  # Warn if metadata tools are missing
-  if [ -n "$MISSING_META_TOOLS" ]; then
-    warn "metadata copying will be skipped or limited because the following tools are missing:$MISSING_META_TOOLS"
+  # In split-only mode, we don't need metadata tools for AAC
+  if [ "$SPLIT_ONLY" = "no" ]; then
+    # Check for metaflac (FLAC metadata tool)
+    if ! command -v metaflac >/dev/null 2>&1; then 
+      MISSING_META_TOOLS="$MISSING_META_TOOLS metaflac"
+    fi
+    
+    # Check for AtomicParsley (MP4/M4A metadata tool)
+    if ! command -v AtomicParsley >/dev/null 2>&1; then 
+      MISSING_META_TOOLS="$MISSING_META_TOOLS AtomicParsley"
+    fi
+    
+    # Warn if metadata tools are missing
+    if [ -n "$MISSING_META_TOOLS" ]; then
+      warn "metadata copying will be skipped or limited because the following tools are missing:$MISSING_META_TOOLS"
+    fi
   fi
 
   # Check for XLD (X Lossless Decoder for CUE sheet splitting)
@@ -238,7 +266,12 @@ check_optional_tools() {
   if command -v xld >/dev/null 2>&1; then
     XLD_PRESENT="yes"
   else
-    warn "XLD not found. Cue-based splitting will be skipped; single-file conversion only."
+    if [ "$SPLIT_ONLY" = "yes" ]; then
+      err "XLD not found. --split-only mode requires XLD to be installed."
+      exit 7
+    else
+      warn "XLD not found. Cue-based splitting will be skipped; single-file conversion only."
+    fi
   fi
 }
 
@@ -268,6 +301,12 @@ validate_paths() {
 # Sets:
 #   AF_ARGS - Array of arguments to pass to afconvert
 setup_afconvert_args() {
+  # Skip if in split-only mode
+  if [ "$SPLIT_ONLY" = "yes" ]; then
+    AF_ARGS=()
+    return
+  fi
+
   : "${AF_OPTS:=}"
   
   # Use custom AF_OPTS if provided, otherwise use defaults
@@ -285,7 +324,10 @@ print_settings() {
   info "Settings summary:"
   info "  Source:        $SRC"
   info "  Destination:   $DEST"
-  debug "  afconvert args: $(printf '%s ' "${AF_ARGS[@]}" | sed -E 's/[[:space:]]+$//')"
+  info "  Mode:          $([ "$SPLIT_ONLY" = "yes" ] && echo "SPLIT ONLY (FLAC)" || echo "Convert to AAC")"
+  if [ "$SPLIT_ONLY" = "no" ]; then
+    debug "  afconvert args: $(printf '%s ' "${AF_ARGS[@]}" | sed -E 's/[[:space:]]+$//')"
+  fi
   info "  SKIP_EXISTING: $SKIP_EXISTING"
   info "  DRY_RUN:       $DRY_RUN"
   info "  VERBOSE:       $VERBOSE"
@@ -455,6 +497,46 @@ convert_to_m4a() {
   fi
 }
 
+# Copy a FLAC file to destination (for split-only mode)
+# Args:
+#   $1 - Input FLAC file path
+#   $2 - Output directory path
+# Returns:
+#   0 on success, 1 on failure
+copy_flac_file() {
+  local in_file="$1"
+  local out_dir="$2"
+  local base="$(basename "$in_file")"
+  local out_file="$out_dir/$base"
+
+  # Handle existing output file
+  if [ -e "$out_file" ]; then
+    if [ "$SKIP_EXISTING" = "yes" ]; then
+      debug "Skipping (exists): $out_file"
+      return 0
+    else
+      rm -f "$out_file" || { warn "could not remove existing $out_file"; return 1; }
+    fi
+  fi
+
+  info "Copying: ${in_file#$SRC/} -> ${out_file#$DEST/}"
+  
+  # In dry-run mode, just show the command that would be executed
+  if [ "$DRY_RUN" = "yes" ]; then
+    printf '  -> DRY RUN: cp %q %q\n' "$in_file" "$out_file"
+    return 0
+  fi
+
+  # Copy the file
+  if cp "$in_file" "$out_file"; then
+    info "  -> OK"
+    return 0
+  else
+    err "  -> ERROR copying $in_file"
+    return 1
+  fi
+}
+
 ###############################################################################
 # CUE sheet detection and handling
 ###############################################################################
@@ -553,9 +635,15 @@ split_with_xld() {
     return 1
   fi
 
-  # Convert each split track to M4A
+  # Process each split track
   find "$TMPD" -maxdepth 1 -type f \( -iname '*.flac' \) -print0 | while IFS= read -r -d '' trackfile; do
-    convert_to_m4a "$trackfile" "$destdir"
+    if [ "$SPLIT_ONLY" = "yes" ]; then
+      # In split-only mode, copy FLAC files
+      copy_flac_file "$trackfile" "$destdir"
+    else
+      # Normal mode: convert to M4A
+      convert_to_m4a "$trackfile" "$destdir"
+    fi
   done
 
   # Clean up temporary directory
@@ -596,7 +684,15 @@ process_flac_file() {
 
   # Create output directory
   mkdir -p "$destdir" || { warn "could not create $destdir"; return 1; }
-  destfile="$destdir/$name.m4a"
+  
+  # Determine output file extension
+  local out_ext
+  if [ "$SPLIT_ONLY" = "yes" ]; then
+    out_ext="flac"
+  else
+    out_ext="m4a"
+  fi
+  destfile="$destdir/$name.$out_ext"
 
   # Check for associated CUE sheet
   local cue_file
@@ -608,10 +704,10 @@ process_flac_file() {
     if split_with_xld "$srcfile" "$cue_file" "$destdir" "$relpath"; then
       return 0
     fi
-    # If XLD split fails, fall through to single-file conversion
+    # If XLD split fails, fall through to single-file conversion/copy
   fi
 
-  # Handle existing output file (for single-file conversion)
+  # Handle existing output file (for single-file processing)
   if [ -e "$destfile" ]; then
     if [ "$SKIP_EXISTING" = "yes" ]; then
       debug "Skipping (exists): $destfile"
@@ -621,8 +717,14 @@ process_flac_file() {
     fi
   fi
 
-  # Convert single FLAC file to M4A
-  convert_to_m4a "$srcfile" "$destdir"
+  # Process single FLAC file
+  if [ "$SPLIT_ONLY" = "yes" ]; then
+    # In split-only mode without CUE, just copy the file
+    copy_flac_file "$srcfile" "$destdir"
+  else
+    # Normal mode: convert to M4A
+    convert_to_m4a "$srcfile" "$destdir"
+  fi
 }
 
 # Process all FLAC files in the source directory recursively

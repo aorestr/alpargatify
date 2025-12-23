@@ -266,8 +266,8 @@ christian punk
 christian r&b
 christian rock
 christian ska
+christmas
 christmas carol
-christmas music
 chumba
 chut-kai-pang
 chutney
@@ -309,6 +309,7 @@ conjunto
 contemporary christian
 contemporary christian music
 contemporary classical
+contemporary flamenco
 contemporary r&b
 contonbley
 contradanza
@@ -506,8 +507,11 @@ filmi-ghazal
 finger-style
 fjatpangarri
 flamenco
-flamenco nuevo
-flamenco rumba
+flamenco fusion
+flamenco jazz
+flamenco metal
+flamenco pop
+flamenco rock
 flower power
 foaie verde
 fofa
@@ -1109,6 +1113,7 @@ nu metal
 nu skool breaks
 nu soul
 nueva canción
+nuevo flamenco
 nyatiti
 obscuro
 oi!
@@ -1296,6 +1301,7 @@ ronggeng
 roots reggae
 roots rock
 roots rock reggae
+rumba
 rumba
 russian pop
 sabar
@@ -1500,8 +1506,7 @@ trikitixa
 trip hop
 trip rock
 trip-hop
-tropicalia
-tropicalismo
+tropical
 tropipop
 truck-driving country
 tumba
