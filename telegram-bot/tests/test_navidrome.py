@@ -42,8 +42,7 @@ def test():
         logger.error(f"FAILURE: get_new_albums failed: {e}", exc_info=True)
 
     # Check 2: Anniversaries
-    # User mentioned Sept 22 has an album (e.g. 2005-09-22).
-    # We will check specifically for Sept 22.
+    # Change the day to one that has an album anniversary in your library
     check_day = 22
     check_month = 9
     logger.info(f"2. Testing get_anniversary_albums (Checking for {check_month}/{check_day})...")

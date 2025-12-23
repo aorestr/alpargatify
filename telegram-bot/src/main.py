@@ -1,9 +1,11 @@
-import time
-import schedule
 import datetime
+import logging
 import os
 import sys
-import logging
+import time
+
+import schedule
+
 from navidrome_client import NavidromeClient
 from telegram_sender import TelegramSender
 
@@ -38,6 +40,7 @@ def job() -> None:
         if new_albums:
             logger.info(f"Found {len(new_albums)} new albums.")
             msg = sender.format_album_list(new_albums, "🆕 Freshly Added Albums (Last 24h)")
+            logger.debug(f"Message: {msg}")
             if msg:
                 sender.send_message(msg)
         else:
@@ -53,6 +56,7 @@ def job() -> None:
         if anniversaries:
             logger.info(f"Found {len(anniversaries)} anniversaries.")
             msg = sender.format_album_list(anniversaries, f"🎂 On this day ({now.strftime('%B %d')}) in music history")
+            logger.debug(f"Message: {msg}")
             if msg:
                 sender.send_message(msg)
         else:

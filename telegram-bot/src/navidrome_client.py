@@ -1,12 +1,14 @@
+import datetime
 import hashlib
 import json
+import logging
 import os
 import random
 import string
+from typing import List, Dict, Optional, Any
+
 import requests
-import datetime
-import logging
-from typing import List, Dict, Optional, Any, Union
+
 from secrets_loader import get_secret
 
 logger = logging.getLogger(__name__)
@@ -25,7 +27,7 @@ class NavidromeClient:
         self.client_name: str = "telegram-bot"
         self.version: str = "1.16.1"
 
-    def _get_auth_params(self) -> Dict[str, str]:
+    def _get_auth_params(self) -> dict[str, str | None]:
         """
         Generate authentication parameters (salt, token, etc.) for Subsonic API.
 
@@ -96,7 +98,11 @@ class NavidromeClient:
 
     def _fetch_album_details(self, album_id: str) -> Optional[Dict[str, Any]]:
         """
-        Fetch detailed information for a single album.
+        Fetch detailed information for a single album using the getAlbum endpoint.
+        This provides enriched metadata including full release dates and genre lists.
+        
+        :param album_id: The unique album ID.
+        :return: Album dictionary with detailed metadata, or None if fetch fails.
         """
         response = self._request('getAlbum', {'id': album_id})
         if response and 'album' in response:
@@ -105,17 +111,20 @@ class NavidromeClient:
 
     def sync_library(self, force: bool = False) -> List[Dict[str, Any]]:
         """
-        Synchronize the library incrementally.
+        Synchronize the album library with incremental enrichment and expiry rotation.
         
-        1. Fetch ALL album IDs from API (lightweight).
-        2. Load existing cache (enriched data).
-        3. Identify NEW albums (in API but not in cache).
-        4. Identify DELETED albums (in cache but not in API).
-        5. Fetch details ONLY for NEW albums.
-        6. Update cache and save.
+        Strategy:
+        1. Fetch ALL album IDs from API (lightweight getAlbumList calls).
+        2. Load existing enriched cache from disk.
+        3. Calculate diffs:
+            - NEW albums: In API but not in cache.
+            - DELETED albums: In cache but not in API.
+            - EXPIRED albums: In cache but _fetched_at > 7 days old.
+        4. Enrich (fetch detailed metadata) for NEW + EXPIRED albums using ThreadPool.
+        5. Reconstruct and save the updated cache.
         
-        :param force: If True, ignores cache and re-fetches everything.
-        :return: List of enriched album dictionaries.
+        :param force: If True, ignores cache and re-fetches all album details.
+        :return: List of enriched album dictionaries with full metadata.
         """
         cache_file = '/app/data/albums_cache.json'
         expiry_days = 7
@@ -171,7 +180,7 @@ class NavidromeClient:
         new_ids = current_ids - cached_ids
         deleted_ids = cached_ids - current_ids
 
-        # Check for expired items in cache
+        # 4. Check for expired items in cache
         expired_ids = set()
         if not force:
             now = datetime.datetime.now(datetime.timezone.utc)
@@ -201,7 +210,7 @@ class NavidromeClient:
         
         logger.info(f"Sync Status: {len(current_api_albums)} total. {len(new_ids)} new. {len(deleted_ids)} deleted. {len(expired_ids)} expired.")
         
-        # 4. Enrich New & Expired Albums
+        # 5. Enrich New & Expired Albums
         new_enriched_albums: List[Dict[str, Any]] = []
         
         if ids_to_fetch:
