@@ -23,14 +23,14 @@ class NavidromeClient:
         Sanitizes the base URL by stripping trailing slashes.
         """
         url = get_secret("navidrome_url")
-        self.base_url: Optional[str] = url.rstrip('/') if url else None
-        self.username: Optional[str] = get_secret("navidrome_user")
-        self.password: Optional[str] = get_secret("navidrome_password")
-        self.client_name: str = "telegram-bot"
-        self.version: str = "1.16.1"
-        self._music_folder_name = "Music Library"
+        self._base_url: Optional[str] = url.rstrip('/') if url else None
+        self._username: Optional[str] = get_secret("navidrome_user")
+        self._password: Optional[str] = get_secret("navidrome_password")
+        self._client_name: str = "telegram-bot"
+        self._api_version: str = os.environ.get("NAVIDROME_API_VERSION", "1.16.1")
+        self._music_folder_name: str = os.environ.get("NAVIDROME_MUSIC_FOLDER", "Music Library")
         self._music_folder_id: Optional[str] = None
-        self._scan_meta_file = '/app/data/scan_status.json'
+        self._scan_meta_file: str = '/app/data/scan_status.json'
 
     def _get_auth_params(self) -> dict[str, str | None]:
         """
@@ -40,18 +40,18 @@ class NavidromeClient:
         """
         salt = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
         
-        if not self.password:
+        if not self._password:
             logger.error("Navidrome password not found in secrets.")
             token = ""
         else:
-            token = hashlib.md5((self.password + salt).encode('utf-8')).hexdigest()
+            token = hashlib.md5((self._password + salt).encode('utf-8')).hexdigest()
             
         return {
-            'u': self.username or "",
+            'u': self._username or "",
             't': token,
             's': salt,
-            'v': self.version,
-            'c': self.client_name,
+            'v': self._api_version,
+            'c': self._client_name,
             'f': 'json'
         }
 
@@ -69,11 +69,11 @@ class NavidromeClient:
         full_params = self._get_auth_params()
         full_params.update(params)
         
-        if not self.base_url:
+        if not self._base_url:
             logger.error("Navidrome URL not found configuration.")
             return None
 
-        url = f"{self.base_url}/rest/{endpoint}"
+        url = f"{self._base_url}/rest/{endpoint}"
         logger.debug(f"Requesting {url} with params: {params}")
         
         try:
@@ -657,7 +657,7 @@ class NavidromeClient:
         :param cover_id: Cover art ID from album metadata
         :return: Full URL to cover art image or None if configuration missing
         """
-        if not self.base_url or not cover_id:
+        if not self._base_url or not cover_id:
             return None
         
         params = self._get_auth_params()
@@ -667,7 +667,7 @@ class NavidromeClient:
         query_parts = [f"{k}={v}" for k, v in params.items()]
         query_string = "&".join(query_parts)
         
-        url = f"{self.base_url}/rest/getCoverArt?{query_string}"
+        url = f"{self._base_url}/rest/getCoverArt?{query_string}"
         return url
 
     def get_cover_art_bytes(self, cover_id: str) -> Optional[bytes]:
@@ -677,13 +677,13 @@ class NavidromeClient:
         :param cover_id: Cover art ID from album metadata
         :return: Cover art image bytes or None if download fails
         """
-        if not self.base_url or not cover_id:
+        if not self._base_url or not cover_id:
             return None
         
         params = self._get_auth_params()
         params['id'] = cover_id
         
-        url = f"{self.base_url}/rest/getCoverArt"
+        url = f"{self._base_url}/rest/getCoverArt"
         
         try:
             response = requests.get(url, params=params)

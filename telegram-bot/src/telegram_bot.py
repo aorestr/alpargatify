@@ -122,9 +122,9 @@ class TelegramBot:
                         f"👤 Artists: {stats.get('artists', 'N/A')}\n"
                         f"🎵 Songs: {stats.get('songs', 'N/A')}\n"
                     )
-                    self.bot.send_message(message.chat.id, stats_text, parse_mode="Markdown")
+                    self.send_message(message.chat.id, stats_text, parse_mode="Markdown")
                 else:
-                    self.bot.send_message(message.chat.id, "❌ Failed to retrieve statistics.")
+                    self.send_message(message.chat.id, "❌ Failed to retrieve statistics.")
                     
             except Exception as e:
                 logger.error(f"Error fetching stats: {e}", exc_info=True)
@@ -187,7 +187,7 @@ class TelegramBot:
                             logger.warning(f"Failed to send cover art: {e}")
                     
                     # Fallback: send as text only
-                    self.bot.send_message(message.chat.id, caption, parse_mode="Markdown")
+                    self.send_message(message.chat.id, caption, parse_mode="Markdown")
                 else:
                     self.bot.reply_to(message, "❌ No albums found in the library.")
                     
@@ -229,7 +229,7 @@ class TelegramBot:
                 results = self.navidrome.search_albums(query, limit=50)
                 
                 if not results:
-                    self.bot.send_message(message.chat.id, f"❌ No albums found matching '{query}'.")
+                    self.send_message(message.chat.id, f"❌ No albums found matching '{query}'.")
                     return
                 
                 msg_lines = [f"🔎 *Results for '{query}':*\n"]
@@ -260,7 +260,7 @@ class TelegramBot:
                     
                     msg_lines.append(line)
                 
-                self.bot.send_message(message.chat.id, "\n".join(msg_lines), parse_mode="Markdown")
+                self.send_message(message.chat.id, "\n".join(msg_lines), parse_mode="Markdown")
                 
             except Exception as e:
                 logger.error(f"Error searching: {e}", exc_info=True)
@@ -288,7 +288,7 @@ class TelegramBot:
                 year = entry.get('year', 'Unknown')
                 msg += f"👤 <b>{user}</b> is listening to:\n🎵 {title} - {artist} ({album}, {year})\n\n"
 
-            self.bot.send_message(message.chat.id, msg, parse_mode="HTML")
+            self.send_message(message.chat.id, msg, parse_mode="HTML")
 
         # NOTE: /top command is preserved but disabled (Navidrome doesn't support global history)
         # @self.bot.message_handler(commands=['top'])
@@ -364,7 +364,7 @@ class TelegramBot:
             if call.data.startswith('genre:'):
                 genre = call.data.split(':')[1]
                 self.bot.answer_callback_query(call.id, f"Searching for {genre} albums...")
-                albums = self.navidrome.get_albums_by_genre(genre, limit=50)
+                albums = self.navidrome.get_albums_by_genre(genre, limit=25)
                 
                 if not albums:
                     self.bot.edit_message_text(f"❓ No albums found for genre '{genre}'.", 
@@ -379,7 +379,7 @@ class TelegramBot:
                 msg = self.format_album_list(albums, intro)
                 if msg:
                     self.bot.delete_message(call.message.chat.id, call.message.message_id)
-                    self.send_notification(msg)
+                    self.send_message(call.message.chat.id, msg)
     
     def start_polling(self) -> None:
         """
@@ -388,13 +388,39 @@ class TelegramBot:
         logger.info("Starting Telegram bot polling...")
         self.bot.infinity_polling()
 
-    # ========== Notification Methods (for scheduled messages) ==========
+    # ========== Notification Methods ==========
+
+    def send_message(self, chat_id: int, text: str, parse_mode: str = "HTML", **kwargs) -> None:
+        """
+        Send a message to a specific chat, automatically splitting it if it exceeds limits.
+        
+        :param chat_id: The Telegram chat ID.
+        :param text: The message content.
+        :param parse_mode: HTML or Markdown.
+        :param kwargs: Additional arguments for send_message (e.g., reply_markup).
+        """
+        # Telegram's message limit is 4096 characters
+        max_length = 4096
+        messages = self._split_message(text, max_length)
+        
+        for i, msg in enumerate(messages):
+            try:
+                # Include kwargs (like reply_markup) only for the last message chunk
+                current_kwargs = kwargs if i == len(messages) - 1 else {}
+                self.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg,
+                    parse_mode=parse_mode,
+                    **current_kwargs
+                )
+                logger.debug(f"Message sent to chat {chat_id}")
+            except Exception as e:
+                logger.error(f"Failed to send message to chat {chat_id}: {e}")
 
     def send_notification(self, text: str, parse_mode: str = "HTML") -> None:
         """
         Send a notification message to all authorized chats.
-        Automatically splits messages that exceed Telegram's 4096 character limit.
-        Used for scheduled notifications (new albums, anniversaries).
+        Used for scheduled notifications.
         
         :param text: The message content.
         :param parse_mode: HTML or Markdown.
@@ -403,22 +429,8 @@ class TelegramBot:
             logger.error("No authorized chat IDs configured.")
             return
 
-        # Telegram's message limit is 4096 characters
-        max_length = 4096
-        messages = self._split_message(text, max_length)
-        
-        # Send to all authorized chats
         for chat_id in self.authorized_chat_ids:
-            for msg in messages:
-                try:
-                    self.bot.send_message(
-                        chat_id=chat_id,
-                        text=msg,
-                        parse_mode=parse_mode
-                    )
-                    logger.debug(f"Notification sent to chat {chat_id}")
-                except Exception as e:
-                    logger.error(f"Failed to send notification to chat {chat_id}: {e}")
+            self.send_message(chat_id, text, parse_mode)
 
     @staticmethod
     def _split_message(text: str, max_length: int) -> List[str]:

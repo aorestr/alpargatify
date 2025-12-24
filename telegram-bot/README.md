@@ -59,6 +59,8 @@ Configure in `docker-compose.yml`:
 - `SCHEDULE_TIME`: Daily notification time (24h HH:MM). Default: `08:00`
 - `RUN_ON_STARTUP`: Run checks on startup (`true`/`false`). Default: `false`
 - `TZ`: Timezone for scheduling. Default: `Europe/Madrid`
+- `NAVIDROME_API_VERSION`: Subsonic API version. Default: `1.16.1`
+- `NAVIDROME_MUSIC_FOLDER`: Exact name of your music library folder. Default: `Music Library`
 
 ### 3. Deploy with Docker Compose
 ```bash
