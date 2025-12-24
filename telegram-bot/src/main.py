@@ -2,8 +2,8 @@ import datetime
 import logging
 import os
 import sys
-import time
 import threading
+import time
 
 import schedule
 
@@ -28,7 +28,7 @@ logger.info(f"Logging configured at level: {log_level_str}")
 # Global bot instance (shared between scheduler and polling threads)
 bot_instance: TelegramBot = None
 
-def job() -> None:
+def daily_job() -> None:
     """
     Scheduled job that checks for new albums and anniversaries.
     Uses the global bot instance for sending notifications.
@@ -70,6 +70,28 @@ def job() -> None:
 
     logger.info("Daily check completed.")
 
+def weekly_job() -> None:
+    """
+    Scheduled job that shows the top 10 albums of the week.
+    """
+    logger.info(f"Starting Sunday weekly top report at {datetime.datetime.now()}")
+    
+    client = NavidromeClient()
+    try:
+        top_albums = client.get_top_albums_from_history(days=7, limit=10)
+        if top_albums:
+            msg = f"🏆 <b>Weekly Top 10 Albums</b>\n(Albums most played in the last 7 days)\n\n"
+            for i, alb in enumerate(top_albums, 1):
+                msg += f"{i}. <b>{alb.get('name')}</b> - {alb.get('artist')} ({alb.get('playCount')} plays)\n"
+            
+            bot_instance.send_notification(msg, parse_mode="HTML")
+        else:
+            logger.info("No playback history found for the weekly report.")
+    except Exception as e:
+        logger.error(f"Error in Sunday report: {e}", exc_info=True)
+    
+    logger.info("Sunday check completed.")
+
 def run_scheduler():
     """
     Run the scheduled job loop in a separate thread.
@@ -78,12 +100,16 @@ def run_scheduler():
     
     # Optional: Run once on startup if ENV var set
     if os.environ.get("RUN_ON_STARTUP", "false").lower() == "true":
-        job()
+        daily_job()
     
     # Schedule daily job
     schedule_time = os.environ.get("SCHEDULE_TIME", "08:00")
     logger.info(f"Scheduling daily job at {schedule_time}")
-    schedule.every().day.at(schedule_time).do(job)
+    schedule.every().day.at(schedule_time).do(daily_job)
+    
+    # Schedule Sunday Job at 12:00
+    logger.info("Scheduling weekly Sunday report at 12:00")
+    schedule.every().sunday.at("12:00").do(weekly_job)
     
     while True:
         schedule.run_pending()

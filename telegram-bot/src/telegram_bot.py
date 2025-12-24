@@ -18,7 +18,8 @@ class TelegramBot:
     """
     def __init__(self):
         """
-        Initialize the bot with token and authorized chat ID(s).
+        Initialize the Telegram bot.
+        Loads configuration from secrets and registers command handlers.
         """
         token = get_secret("telegram_bot_token")
         if not token:
@@ -46,8 +47,8 @@ class TelegramBot:
         """
         Check if a command comes from an authorized chat.
         
-        :param chat_id: Telegram chat ID where the command was sent
-        :return: True if authorized, False otherwise
+        :param chat_id: Telegram chat ID to check.
+        :return: True if the chat is authorized, False otherwise.
         """
         if not self.authorized_chat_ids:
             return False
@@ -62,7 +63,10 @@ class TelegramBot:
     
     def authorized_only(self, func):
         """
-        Decorator to restrict commands to authorized chat only.
+        Decorator to restrict command access to authorized group chats only.
+
+        :param func: The function to be decorated.
+        :return: The decorated function.
         """
         @wraps(func)
         def wrapper(message: Message):
@@ -74,16 +78,24 @@ class TelegramBot:
     
     def _register_handlers(self):
         """
-        Register all bot command handlers.
+        Register all Telegram message and callback handlers.
         """
         @self.bot.message_handler(commands=['start', 'help'])
         @self.authorized_only
         def send_welcome(message: Message):
+            """
+            Handle /start and /help commands.
+            
+            :param message: Telegram message object.
+            """
             help_text = (
                 "👋 *Hello! I am the Navidrome Bot.*\n\n"
                 "Available commands:\n"
                 "• /search <text> - Search for an artist or album\n"
                 "• /random - Suggest a random album\n"
+                "• /nowplaying - Show who is listening to what\n"
+                "• /top - Interaction menu for Top albums\n"
+                "• /genres - Browse albums by genre\n"
                 "• /stats - Show server statistics\n"
                 "• /help - Show this message"
             )
@@ -93,6 +105,11 @@ class TelegramBot:
         @self.bot.message_handler(commands=['stats'])
         @self.authorized_only
         def get_stats(message: Message):
+            """
+            Handle /stats command to show library statistics.
+            
+            :param message: Telegram message object.
+            """
             logger.info(f"User {message.from_user.username} requested stats")
             try:
                 self.bot.reply_to(message, "🔄 Fetching server statistics...")
@@ -116,6 +133,11 @@ class TelegramBot:
         @self.bot.message_handler(commands=['random'])
         @self.authorized_only
         def get_random_album(message: Message):
+            """
+            Handle /random command to suggest a random album from the library.
+            
+            :param message: Telegram message object.
+            """
             logger.info(f"User {message.from_user.username} requested random album")
             try:
                 self.bot.reply_to(message, "🎲 Finding a random album...")
@@ -176,6 +198,11 @@ class TelegramBot:
         @self.bot.message_handler(commands=['search'])
         @self.authorized_only
         def search_music(message: Message):
+            """
+            Handle /search <query> command to find albums by artist or title.
+            
+            :param message: Telegram message object.
+            """
             # Extract query from message: "/search radiohead" -> "radiohead"
             # Remove command and bot mentions (e.g., @botname)
             query = message.text.replace("/search", "").strip()
@@ -238,10 +265,125 @@ class TelegramBot:
             except Exception as e:
                 logger.error(f"Error searching: {e}", exc_info=True)
                 self.bot.reply_to(message, f"❌ Error searching: {str(e)}")
+
+        @self.bot.message_handler(commands=['nowplaying'])
+        @self.authorized_only
+        def now_playing(message: Message):
+            """
+            Handle /nowplaying command to show real-time playback.
+            
+            :param message: Telegram message object.
+            """
+            entries = self.navidrome.get_now_playing()
+            if not entries:
+                self.bot.reply_to(message, "🤫 Nobody is listening to music right now.")
+                return
+
+            msg = "🎧 <b>Now Playing:</b>\n\n"
+            for entry in entries:
+                user = entry.get('username', 'Someone')
+                title = entry.get('title', 'Unknown')
+                artist = entry.get('artist', 'Unknown')
+                album = entry.get('album', 'Unknown')
+                year = entry.get('year', 'Unknown')
+                msg += f"👤 <b>{user}</b> is listening to:\n🎵 {title} - {artist} ({album}, {year})\n\n"
+
+            self.bot.send_message(message.chat.id, msg, parse_mode="HTML")
+
+        @self.bot.message_handler(commands=['top'])
+        @self.authorized_only
+        def top_albums_start(message: Message):
+            """
+            Handle /top command to show the period selection menu.
+            
+            :param message: Telegram message object.
+            """
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("1 Day", callback_data="top:1"),
+                InlineKeyboardButton("3 Days", callback_data="top:3")
+            )
+            markup.row(
+                InlineKeyboardButton("7 Days", callback_data="top:7"),
+                InlineKeyboardButton("30 Days", callback_data="top:30")
+            )
+            self.bot.send_message(message.chat.id, "📊 Select the period for the Top 10 albums:", reply_markup=markup)
+
+        @self.bot.message_handler(commands=['genres'])
+        @self.authorized_only
+        def list_genres(message: Message):
+            """
+            Handle /genres command to list available genres.
+            
+            :param message: Telegram message object.
+            """
+            genres = self.navidrome.get_genres()
+            if not genres:
+                self.bot.reply_to(message, "📭 No genres found.")
+                return
+
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            markup = InlineKeyboardMarkup(row_width=2)
+            # Create buttons for each genre
+            buttons = [InlineKeyboardButton(g.get('value', 'None'), callback_data=f"genre:{g.get('value', 'None')}") for g in genres if g.get('value')]
+            
+            # Explicitly add 'None' if it's a valid query but not in the list as 'None'
+            if not any(g.get('value') == 'None' for g in genres):
+                 buttons.append(InlineKeyboardButton("No Genre", callback_data="genre:None"))
+            
+            # Limit number of buttons to avoid huge keyboards
+            buttons = buttons[:80] 
+            
+            markup.add(*buttons)
+            self.bot.send_message(message.chat.id, "🎷 Select a genre to explore:", reply_markup=markup)
+
+        @self.bot.callback_query_handler(func=lambda call: call.data.startswith('top:') or call.data.startswith('genre:'))
+        def handle_callback(call):
+            """
+            Handle all inline keyboard callback queries (top periods and genre selection).
+            
+            :param call: Telegram callback query object.
+            """
+            if call.data.startswith('top:'):
+                days = int(call.data.split(':')[1])
+                self.bot.answer_callback_query(call.id, f"Calculating top for {days} days...")
+                albums = self.navidrome.get_top_albums_from_history(days=days, limit=10)
+                
+                if not albums:
+                    self.bot.edit_message_text(f"📉 No playback data found for the last {days} days.", 
+                                              call.message.chat.id, call.message.message_id)
+                    return
+
+                msg = f"🏆 <b>Top 10 Albums ({days} days):</b>\n\n"
+                for i, alb in enumerate(albums, 1):
+                    msg += f"{i}. <b>{alb.get('name')}</b> - {alb.get('artist')} ({alb.get('playCount')} plays)\n"
+                
+                self.bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, parse_mode="HTML")
+
+            elif call.data.startswith('genre:'):
+                genre = call.data.split(':')[1]
+                self.bot.answer_callback_query(call.id, f"Searching for {genre} albums...")
+                albums = self.navidrome.get_albums_by_genre(genre, limit=50)
+                
+                if not albums:
+                    self.bot.edit_message_text(f"❓ No albums found for genre '{genre}'.", 
+                                              call.message.chat.id, call.message.message_id)
+                    return
+
+                # For large lists, we send a new message and delete the menu for a cleaner experience
+                intro = f"🎸 Random albums from <b>{genre}</b>:"
+                if genre == 'None':
+                    intro = "🎸 Random albums with <b>no defined genre</b>:"
+                
+                msg = self.format_album_list(albums, intro)
+                if msg:
+                    self.bot.delete_message(call.message.chat.id, call.message.message_id)
+                    self.send_notification(msg)
     
-    def start_polling(self):
+    def start_polling(self) -> None:
         """
-        Start the bot polling loop. This is a blocking call.
+        Start the bot polling loop (blocking).
         """
         logger.info("Starting Telegram bot polling...")
         self.bot.infinity_polling()
@@ -323,7 +465,7 @@ class TelegramBot:
     def format_album_list(albums: List[Dict], intro_text: str) -> Optional[str]:
         """
         Format a list of album dictionaries into a readable HTML message.
-        Used for scheduled notifications.
+        Used for both scheduled notifications and command responses.
 
         :param albums: List of album objects from Navidrome API.
         :param intro_text: Header text for the message.

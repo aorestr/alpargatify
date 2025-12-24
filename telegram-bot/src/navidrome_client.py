@@ -21,11 +21,15 @@ class NavidromeClient:
         """
         Initialize the Navidrome client with credentials from secrets.
         """
-        self.base_url: Optional[str] = get_secret("navidrome_url")
+        url = get_secret("navidrome_url")
+        self.base_url: Optional[str] = url.rstrip('/') if url else None
         self.username: Optional[str] = get_secret("navidrome_user")
         self.password: Optional[str] = get_secret("navidrome_password")
         self.client_name: str = "telegram-bot"
         self.version: str = "1.16.1"
+        self._music_folder_name = "Music Library"
+        self._music_folder_id: Optional[str] = None
+        self._scan_meta_file = '/app/data/scan_status.json'
 
     def _get_auth_params(self) -> dict[str, str | None]:
         """
@@ -69,7 +73,7 @@ class NavidromeClient:
             return None
 
         url = f"{self.base_url}/rest/{endpoint}"
-        logger.debug(f"Requesting {endpoint} with params: {params}")
+        logger.debug(f"Requesting {url} with params: {params}")
         
         try:
             response = requests.get(url, params=full_params)
@@ -95,6 +99,37 @@ class NavidromeClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error connecting to Navidrome: {e}")
             return None
+
+    def get_music_folder_id(self) -> Optional[str]:
+        """
+        Find the ID of the music folder matching self._music_folder_name.
+        Caches the result in memory.
+        """
+        if self._music_folder_id:
+            return self._music_folder_id
+
+        response = self._request('getMusicFolders')
+        if response and 'musicFolders' in response:
+            folders = response['musicFolders'].get('musicFolder', [])
+            for folder in folders:
+                if folder.get('name') == self._music_folder_name:
+                    self._music_folder_id = str(folder.get('id'))
+                    logger.info(f"Detected music folder '{self._music_folder_name}' with ID: {self._music_folder_id}")
+                    return self._music_folder_id
+        
+        logger.warning(f"Could not find music folder named '{self._music_folder_name}'")
+        return None
+
+    def check_scan_status(self) -> Optional[Dict[str, Any]]:
+        """
+        Check the current scan status of the Navidrome server.
+        
+        :return: Dictionary with scan status details or None on failure.
+        """
+        response = self._request('getScanStatus')
+        if response and 'scanStatus' in response:
+            return response['scanStatus']
+        return None
 
     def _fetch_album_details(self, album_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -129,6 +164,30 @@ class NavidromeClient:
         cache_file = '/app/data/albums_cache.json'
         expiry_days = 7
         os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+
+        # 0. Check Scan Status before doing anything heavy
+        if not force:
+            try:
+                current_status = self.check_scan_status()
+                if current_status and not current_status.get('scanning'):
+                    current_count = current_status.get('count')
+                    last_scan = current_status.get('lastScan')
+                    
+                    if os.path.exists(self._scan_meta_file):
+                        with open(self._scan_meta_file, 'r') as f:
+                            saved_status = json.load(f)
+                        
+                        if saved_status.get('count') == current_count and saved_status.get('lastScan') == last_scan:
+                            if os.path.exists(cache_file):
+                                logger.info("Scan status unchanged and cache exists. Skipping full sync.")
+                                with open(cache_file, 'r') as f:
+                                    return json.load(f)
+                    
+                    # Save current status for next time if we're about to sync
+                    with open(self._scan_meta_file, 'w') as f:
+                        json.dump({'count': current_count, 'lastScan': last_scan}, f)
+            except Exception as e:
+                logger.warning(f"Optimization check failed: {e}. Proceeding with sync.")
         
         cached_albums: Dict[str, Dict[str, Any]] = {}
         
@@ -159,7 +218,13 @@ class NavidromeClient:
         logger.info("Fetching full album list (IDs) from Navidrome...")
         while True:
             logger.debug(f"Fetching batch: offset={offset}")
-            response = self._request('getAlbumList', {'type': 'alphabeticalByArtist', 'size': size, 'offset': offset})
+            params = {'type': 'alphabeticalByArtist', 'size': size, 'offset': offset}
+            
+            folder_id = self.get_music_folder_id()
+            if folder_id:
+                params['musicFolderId'] = folder_id
+                
+            response = self._request('getAlbumList', params)
             if not response or 'albumList' not in response:
                 break
             
@@ -380,10 +445,16 @@ class NavidromeClient:
         
         :return: Random album dictionary or None if not found
         """
-        response = self._request('getAlbumList2', {
+        params = {
             'type': 'random',
             'size': 1
-        })
+        }
+        
+        folder_id = self.get_music_folder_id()
+        if folder_id:
+            params['musicFolderId'] = folder_id
+
+        response = self._request('getAlbumList2', params)
         
         if response and 'albumList2' in response:
             albums = response['albumList2'].get('album', [])
@@ -392,6 +463,133 @@ class NavidromeClient:
                 return albums[0]
         
         return None
+
+    def get_now_playing(self) -> List[Dict[str, Any]]:
+        """
+        Get a list of currently playing songs across all users.
+        Requires admin privileges for the configured user.
+        """
+        response = self._request('getNowPlaying')
+        if response and 'nowPlaying' in response:
+            return response['nowPlaying'].get('entry', [])
+        return []
+
+    def get_top_albums_from_history(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Calculate top albums by aggregating playback history for the current user.
+        NOTE: Navidrome (Subsonic API) does not support global history for all users.
+        If 'getHistory' is unsupported (404), it falls back to the user's 'frequent' albums.
+
+        :param days: Number of days to look back (if getHistory is supported).
+        :param limit: Maximum number of albums to return.
+        :return: List of top album dictionaries.
+        """
+        # Fetch history (default limit is usually 50, let's get more for better stats)
+        # getHistory doesn't take 'days', so we fetch a large batch and filter locally.
+        response = self._request('getHistory', {'size': 500})
+        
+        if not response or 'history' not in response:
+            logger.warning("getHistory returned no data or error. Falling back to 'frequent' albums.")
+            fallback = self._request('getAlbumList2', {'type': 'frequent', 'size': limit})
+            if fallback and 'albumList2' in fallback:
+                return fallback['albumList2'].get('album', [])
+            return []
+        
+        entries = response['history'].get('item', [])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        cutoff = now - datetime.timedelta(days=days)
+        
+        logger.debug(f"Aggregating top albums. Now (UTC): {now}, Cutoff (UTC): {cutoff}")
+        
+        album_stats = {} # album_id -> {details, count}
+        
+        for entry in entries:
+            # Entry 'played' can be:
+            # 1. Timestamp in ms (Subsonic Spec)
+            # 2. Timestamp in seconds (Some variants)
+            # 3. ISO 8601 string (Navidrome/JSON default in some cases)
+            played_val = entry.get('played')
+            if not played_val:
+                continue
+            
+            try:
+                if isinstance(played_val, (int, float)):
+                    # Heuristic: if value < 10^11, it's probably seconds
+                    # (Current time in ms is ~1.7e12, in s is ~1.7e9)
+                    if played_val < 100000000000: 
+                        played_ms = played_val * 1000
+                    else:
+                        played_ms = played_val
+                    played_dt = datetime.datetime.fromtimestamp(played_ms / 1000.0, tz=datetime.timezone.utc)
+                else:
+                    # Try parsing as ISO string
+                    # Navidrome often returns "2024-12-24T12:00:00Z"
+                    s_val = str(played_val)
+                    if s_val.endswith('Z'):
+                        s_val = s_val[:-1] + '+00:00'
+                    played_dt = datetime.datetime.fromisoformat(s_val)
+                    if played_dt.tzinfo is None:
+                        played_dt = played_dt.replace(tzinfo=datetime.timezone.utc)
+            except Exception as e:
+                logger.warning(f"Could not parse played date '{played_val}': {e}")
+                continue
+            
+            if played_dt < cutoff:
+                logger.debug(f"Skipping entry: {entry.get('title')} played at {played_dt} (before {cutoff})")
+                continue
+            
+            album_id = entry.get('albumId')
+            if not album_id:
+                continue
+                
+            if album_id not in album_stats:
+                album_stats[album_id] = {
+                    'id': album_id,
+                    'name': entry.get('album'),
+                    'artist': entry.get('artist'),
+                    'playCount': 0,
+                    'coverArt': entry.get('coverArt')
+                }
+            album_stats[album_id]['playCount'] += 1
+            
+        # Sort by playCount desc
+        top_albums = sorted(album_stats.values(), key=lambda x: x['playCount'], reverse=True)
+        logger.info(f"Top albums aggregation complete. Found {len(top_albums)} unique albums in range.")
+        return top_albums[:limit]
+
+    def get_genres(self) -> List[Dict[str, Any]]:
+        """
+        Get all available genres.
+        """
+        response = self._request('getGenres')
+        if response and 'genres' in response:
+            return response['genres'].get('genre', [])
+        return []
+
+    def get_albums_by_genre(self, genre: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get a random selection of albums for a specific genre.
+        
+        :param genre: Genre name. 'None' means albums without a genre.
+        :param limit: Maximum number of albums to return.
+        """
+        params = {
+            'type': 'byGenre',
+            'genre': genre if genre != 'None' else '',
+            'size': 500 # Fetch more to randomize
+        }
+        
+        folder_id = self.get_music_folder_id()
+        if folder_id:
+            params['musicFolderId'] = folder_id
+            
+        response = self._request('getAlbumList2', params)
+        if response and 'albumList2' in response:
+            albums = response['albumList2'].get('album', [])
+            if albums:
+                random.shuffle(albums)
+                return albums[:limit]
+        return []
 
     def get_server_stats(self) -> Optional[Dict[str, int]]:
         """
