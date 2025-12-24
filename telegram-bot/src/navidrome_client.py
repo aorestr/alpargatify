@@ -20,6 +20,7 @@ class NavidromeClient:
     def __init__(self):
         """
         Initialize the Navidrome client with credentials from secrets.
+        Sanitizes the base URL by stripping trailing slashes.
         """
         url = get_secret("navidrome_url")
         self.base_url: Optional[str] = url.rstrip('/') if url else None
@@ -103,7 +104,9 @@ class NavidromeClient:
     def get_music_folder_id(self) -> Optional[str]:
         """
         Find the ID of the music folder matching self._music_folder_name.
-        Caches the result in memory.
+        Caches the result in memory for efficiency.
+
+        :return: The folder ID as a string, or None if not found.
         """
         if self._music_folder_id:
             return self._music_folder_id
@@ -337,7 +340,12 @@ class NavidromeClient:
 
     def get_new_albums(self, hours: int = 24, force: bool = False) -> List[Dict[str, Any]]:
         """
-        Get albums added in the last N hours by filtering the synchronized library.
+        Get albums added to the library in the last N hours.
+        Filters the synchronized library cache.
+
+        :param hours: Number of hours to look back.
+        :param force: If True, force a full library synchronization.
+        :return: List of new album dictionaries sorted by creation date.
         """
         all_albums = self.sync_library(force=force) 
         
@@ -370,8 +378,13 @@ class NavidromeClient:
 
     def get_anniversary_albums(self, day: int, month: int, force: bool = False) -> List[Dict[str, Any]]:
         """
-        Find albums released on the specified day and month by filtering the library.
-        Handles both ISO strings and Navidrome's dict keys for 'releaseDate'.
+        Find albums released on the specified day and month across all years.
+        Handles various release date formats (ISO strings and Navidrome dictionaries).
+
+        :param day: Day of the month (1-31).
+        :param month: Month of the year (1-12).
+        :param force: If True, force a full library synchronization.
+        :return: List of matching album dictionaries.
         """
         all_albums = self.sync_library(force=force)
         
@@ -419,11 +432,12 @@ class NavidromeClient:
 
     def search_albums(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
-        Search for albums matching the given query.
-        
-        :param query: Search term (artist or album name)
-        :param limit: Maximum number of results to return
-        :return: List of matching albums
+        Search for albums using the Subsonic search3 endpoint.
+        Matches against artist names and album titles.
+
+        :param query: The search query string.
+        :param limit: Maximum number of albums to return.
+        :return: List of matching album dictionaries.
         """
         response = self._request('search3', {
             'query': query,
@@ -441,9 +455,9 @@ class NavidromeClient:
 
     def get_random_album(self) -> Optional[Dict[str, Any]]:
         """
-        Get a random album from the library.
-        
-        :return: Random album dictionary or None if not found
+        Fetch a single random album from the library.
+
+        :return: A random album dictionary or None if no albums are available.
         """
         params = {
             'type': 'random',
@@ -466,8 +480,10 @@ class NavidromeClient:
 
     def get_now_playing(self) -> List[Dict[str, Any]]:
         """
-        Get a list of currently playing songs across all users.
-        Requires admin privileges for the configured user.
+        Retrieve currently playing tracks for the authenticated user.
+        NOTE: Navidrome does not support global 'Now Playing' for all users via Subsonic API.
+
+        :return: List of now playing entry dictionaries.
         """
         response = self._request('getNowPlaying')
         if response and 'nowPlaying' in response:
@@ -477,10 +493,13 @@ class NavidromeClient:
     def get_top_albums_from_history(self, days: int = 7, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Calculate top albums by aggregating playback history for the current user.
-        NOTE: Navidrome (Subsonic API) does not support global history for all users.
-        If 'getHistory' is unsupported (404), it falls back to the user's 'frequent' albums.
+        
+        NOTE: This functionality is CURRENTLY UNUSED and not exposed in the bot.
+        Navidrome (Subsonic API) does not support global history for all users, 
+        making server-wide statistics impossible via API at this time.
+        We preserve this code for future use if API capabilities expand.
 
-        :param days: Number of days to look back (if getHistory is supported).
+        :param days: Number of days to look back.
         :param limit: Maximum number of albums to return.
         :return: List of top album dictionaries.
         """
@@ -559,7 +578,9 @@ class NavidromeClient:
 
     def get_genres(self) -> List[Dict[str, Any]]:
         """
-        Get all available genres.
+        Fetch all music genres available in the library.
+
+        :return: List of genre objects (dictionaries).
         """
         response = self._request('getGenres')
         if response and 'genres' in response:
@@ -568,10 +589,12 @@ class NavidromeClient:
 
     def get_albums_by_genre(self, genre: str, limit: int = 50) -> List[Dict[str, Any]]:
         """
-        Get a random selection of albums for a specific genre.
-        
-        :param genre: Genre name. 'None' means albums without a genre.
+        Retrieve a selection of albums for a specific genre.
+        Used for the /genres command exploration.
+
+        :param genre: The genre name (case sensitive). 'None' for albums without a genre.
         :param limit: Maximum number of albums to return.
+        :return: List of album dictionaries.
         """
         params = {
             'type': 'byGenre',

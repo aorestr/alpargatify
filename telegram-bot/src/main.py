@@ -70,27 +70,29 @@ def daily_job() -> None:
 
     logger.info("Daily check completed.")
 
-def weekly_job() -> None:
-    """
-    Scheduled job that shows the top 10 albums of the week.
-    """
-    logger.info(f"Starting Sunday weekly top report at {datetime.datetime.now()}")
-    
-    client = NavidromeClient()
-    try:
-        top_albums = client.get_top_albums_from_history(days=7, limit=10)
-        if top_albums:
-            msg = f"🏆 <b>Weekly Top 10 Albums</b>\n(Albums most played in the last 7 days)\n\n"
-            for i, alb in enumerate(top_albums, 1):
-                msg += f"{i}. <b>{alb.get('name')}</b> - {alb.get('artist')} ({alb.get('playCount')} plays)\n"
-            
-            bot_instance.send_notification(msg, parse_mode="HTML")
-        else:
-            logger.info("No playback history found for the weekly report.")
-    except Exception as e:
-        logger.error(f"Error in Sunday report: {e}", exc_info=True)
-    
-    logger.info("Sunday check completed.")
+# NOTE: The weekly top report is currently disabled as Navidrome API 
+# doesn't support global stats for all users. Preserving code for future use.
+# def weekly_job() -> None:
+#     """
+#     Scheduled job that shows the top 10 albums of the week.
+#     """
+#     logger.info(f"Starting Sunday weekly top report at {datetime.datetime.now()}")
+#     
+#     client = NavidromeClient()
+#     try:
+#         top_albums = client.get_top_albums_from_history(days=7, limit=10)
+#         if top_albums:
+#             msg = f"🏆 <b>Weekly Top 10 Albums</b>\n(Albums most played in the last 7 days)\n\n"
+#             for i, alb in enumerate(top_albums, 1):
+#                 msg += f"{i}. <b>{alb.get('name')}</b> - {alb.get('artist')} ({alb.get('playCount')} plays)\n"
+#             
+#             bot_instance.send_notification(msg, parse_mode="HTML")
+#         else:
+#             logger.info("No playback history found for the weekly report.")
+#     except Exception as e:
+#         logger.error(f"Error in Sunday report: {e}", exc_info=True)
+#     
+#     logger.info("Sunday check completed.")
 
 def run_scheduler():
     """
@@ -107,9 +109,9 @@ def run_scheduler():
     logger.info(f"Scheduling daily job at {schedule_time}")
     schedule.every().day.at(schedule_time).do(daily_job)
     
-    # Schedule Sunday Job at 12:00
-    logger.info("Scheduling weekly Sunday report at 12:00")
-    schedule.every().sunday.at("12:00").do(weekly_job)
+    # Weekly Sunday report (Disabled: Navidrome API doesn't support global history)
+    # logger.info("Scheduling weekly Sunday report at 12:00")
+    # schedule.every().sunday.at("12:00").do(weekly_job)
     
     while True:
         schedule.run_pending()

@@ -13,12 +13,16 @@ Automatic daily updates about your music library:
 Chat with your bot to explore your library:
 - `/search <query>` - Search for albums by artist or title (up to 50 results)
 - `/random` - Get a random album suggestion with cover art
+- `/nowplaying` - Real-time playback for the authenticated bot user (Subsonic API limitation)
+- `/genres` - Browse genres and get 50 random albums
 - `/stats` - View library statistics (albums, artists, songs)
 - `/help` - Display available commands
 
 ### Key Technical Features
 - **Group Authorization**: Bot only responds to commands from the authorized group chat - no individual user management needed
-- **Incremental Sync**: Efficiently caches your library and only fetches new metadata, reducing API load
+- **Incremental Sync**: Efficiently caches your library and only fetches new metadata.
+- **Smart Optimization**: Skips library sync if Navidrome's scan status (count/last scan) hasn't changed.
+- **Folder Filtering**: Automatically detects your "Music Library" to filter suggestions.
 - **Rich Formatting**: Beautiful messages with emojis, years, and multiple genres
 - **Cover Art**: Album covers sent with random suggestions
 - **Alpine-Based**: Optimized Docker image (~105MB) using multi-stage builds
@@ -122,6 +126,7 @@ telegram-bot/
 ### Running Tests
 ```bash
 docker-compose run --rm telegram-bot python tests/test_navidrome.py
+docker-compose run --rm telegram-bot python tests/test_features.py
 ```
 
 ### Updating the Bot
@@ -164,6 +169,15 @@ docker-compose up -d
 
 [Album cover image]
 ```
+
+## ⚠️ Known Limitations
+
+Due to current Navidrome (Subsonic) API implementation:
+- **Global Stats**: The API only exposes data for the authenticated user. Therefore, features like a global server-wide "Top Albums" or "Now Playing for all users" are currently not possible via API alone. 
+- **User Exposure**: Admin accounts cannot query other users' history via the Subsonic API.
+
+**Preserved Work (Currently Disabled):**
+The code for the `/top` command and the Weekly Sunday report is still present in the repository but has been commented out. This logic is preserved so it can be easily re-enabled if Navidrome adds global administrative extensions (OpenSubsonic) or if a future implementation uses direct database access.
 
 ## 🐛 Troubleshooting
 

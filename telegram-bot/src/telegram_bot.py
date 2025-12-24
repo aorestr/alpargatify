@@ -94,10 +94,10 @@ class TelegramBot:
                 "• /search <text> - Search for an artist or album\n"
                 "• /random - Suggest a random album\n"
                 "• /nowplaying - Show who is listening to what\n"
-                "• /top - Interaction menu for Top albums\n"
                 "• /genres - Browse albums by genre\n"
                 "• /stats - Show server statistics\n"
-                "• /help - Show this message"
+                "• /help - Show this message\n\n"
+                "⚠️ Note: /top command is currently disabled due to Navidrome API limitations."
             )
             self.bot.reply_to(message, help_text, parse_mode="Markdown")
             logger.info(f"User {message.from_user.username} requested help")
@@ -290,25 +290,24 @@ class TelegramBot:
 
             self.bot.send_message(message.chat.id, msg, parse_mode="HTML")
 
-        @self.bot.message_handler(commands=['top'])
-        @self.authorized_only
-        def top_albums_start(message: Message):
-            """
-            Handle /top command to show the period selection menu.
-            
-            :param message: Telegram message object.
-            """
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-            markup = InlineKeyboardMarkup()
-            markup.row(
-                InlineKeyboardButton("1 Day", callback_data="top:1"),
-                InlineKeyboardButton("3 Days", callback_data="top:3")
-            )
-            markup.row(
-                InlineKeyboardButton("7 Days", callback_data="top:7"),
-                InlineKeyboardButton("30 Days", callback_data="top:30")
-            )
-            self.bot.send_message(message.chat.id, "📊 Select the period for the Top 10 albums:", reply_markup=markup)
+        # NOTE: /top command is preserved but disabled (Navidrome doesn't support global history)
+        # @self.bot.message_handler(commands=['top'])
+        # @self.authorized_only
+        # def top_albums_start(message: Message):
+        #     """
+        #     Handle /top command to show the period selection menu.
+        #     """
+        #     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        #     markup = InlineKeyboardMarkup()
+        #     markup.row(
+        #         InlineKeyboardButton("1 Day", callback_data="top:1"),
+        #         InlineKeyboardButton("3 Days", callback_data="top:3")
+        #     )
+        #     markup.row(
+        #         InlineKeyboardButton("7 Days", callback_data="top:7"),
+        #         InlineKeyboardButton("30 Days", callback_data="top:30")
+        #     )
+        #     self.bot.send_message(message.chat.id, "📊 Select the period for the Top 10 albums:", reply_markup=markup)
 
         @self.bot.message_handler(commands=['genres'])
         @self.authorized_only
@@ -338,30 +337,31 @@ class TelegramBot:
             markup.add(*buttons)
             self.bot.send_message(message.chat.id, "🎷 Select a genre to explore:", reply_markup=markup)
 
-        @self.bot.callback_query_handler(func=lambda call: call.data.startswith('top:') or call.data.startswith('genre:'))
+        @self.bot.callback_query_handler(func=lambda call: call.data.startswith('genre:'))
         def handle_callback(call):
             """
-            Handle all inline keyboard callback queries (top periods and genre selection).
+            Handle all inline keyboard callback queries (genre selection).
             
             :param call: Telegram callback query object.
             """
-            if call.data.startswith('top:'):
-                days = int(call.data.split(':')[1])
-                self.bot.answer_callback_query(call.id, f"Calculating top for {days} days...")
-                albums = self.navidrome.get_top_albums_from_history(days=days, limit=10)
-                
-                if not albums:
-                    self.bot.edit_message_text(f"📉 No playback data found for the last {days} days.", 
-                                              call.message.chat.id, call.message.message_id)
-                    return
+            # Preservation of top callback logic (Disabled: Navidrome doesn't support global stats)
+            # if call.data.startswith('top:'):
+            #     days = int(call.data.split(':')[1])
+            #     self.bot.answer_callback_query(call.id, f"Calculating top for {days} days...")
+            #     albums = self.navidrome.get_top_albums_from_history(days=days, limit=10)
+            #     
+            #     if not albums:
+            #         self.bot.edit_message_text(f"📉 No playback data found for the last {days} days.", 
+            #                                   call.message.chat.id, call.message.message_id)
+            #         return
+            #
+            #     msg = f"🏆 <b>Top 10 Albums ({days} days):</b>\n\n"
+            #     for i, alb in enumerate(albums, 1):
+            #         msg += f"{i}. <b>{alb.get('name')}</b> - {alb.get('artist')} ({alb.get('playCount')} plays)\n"
+            #     
+            #     self.bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, parse_mode="HTML")
 
-                msg = f"🏆 <b>Top 10 Albums ({days} days):</b>\n\n"
-                for i, alb in enumerate(albums, 1):
-                    msg += f"{i}. <b>{alb.get('name')}</b> - {alb.get('artist')} ({alb.get('playCount')} plays)\n"
-                
-                self.bot.edit_message_text(msg, call.message.chat.id, call.message.message_id, parse_mode="HTML")
-
-            elif call.data.startswith('genre:'):
+            if call.data.startswith('genre:'):
                 genre = call.data.split(':')[1]
                 self.bot.answer_callback_query(call.id, f"Searching for {genre} albums...")
                 albums = self.navidrome.get_albums_by_genre(genre, limit=50)
