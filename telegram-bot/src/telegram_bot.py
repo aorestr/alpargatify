@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 
 class TelegramBot:
     """
-    Interactive Telegram bot for Navidrome music library.
-    Handles user commands with authorization via whitelist.
+    Unified Telegram bot for Navidrome music library.
+    Handles both interactive commands (with group authorization) and scheduled notifications.
     """
     def __init__(self):
         """
-        Initialize the bot with token, chat ID, and authorized user IDs.
+        Initialize the bot with token and authorized chat ID.
         """
         token = get_secret("telegram_bot_token")
         if not token:
@@ -26,46 +26,44 @@ class TelegramBot:
         
         self.bot = telebot.TeleBot(token)
         self.navidrome = NavidromeClient()
-        self.notification_chat_id: Optional[str] = get_secret("telegram_chat_id")
         
-        # Load authorized user IDs from secret
-        user_ids_str = get_secret("telegram_user_ids", "")
-        self.allowed_user_ids: List[int] = []
+        # Load authorized chat ID (used for both notifications and command authorization)
+        self.authorized_chat_id: Optional[str] = get_secret("telegram_chat_id")
         
-        if user_ids_str:
-            try:
-                self.allowed_user_ids = [int(uid.strip()) for uid in user_ids_str.split(",") if uid.strip()]
-                logger.info(f"Loaded {len(self.allowed_user_ids)} authorized user IDs")
-            except ValueError as e:
-                logger.error(f"Error parsing telegram_user_ids: {e}")
+        if not self.authorized_chat_id:
+            logger.warning("No authorized chat ID configured. Bot will reject all requests.")
         else:
-            logger.warning("No authorized user IDs configured. Bot will reject all requests.")
+            logger.info(f"Bot authorized for chat ID: {self.authorized_chat_id}")
         
         # Register command handlers
         self._register_handlers()
     
-    def _is_authorized(self, user_id: int, username: Optional[str] = None) -> bool:
+    
+    def _is_authorized(self, chat_id: int) -> bool:
         """
-        Check if a user is authorized to use the bot.
+        Check if a command comes from the authorized chat.
         
-        :param user_id: Telegram user ID
-        :param username: Telegram username (for logging)
+        :param chat_id: Telegram chat ID where the command was sent
         :return: True if authorized, False otherwise
         """
-        if user_id in self.allowed_user_ids:
+        if not self.authorized_chat_id:
+            return False
+        
+        # Convert chat_id to string for comparison (can be negative for groups)
+        if str(chat_id) == self.authorized_chat_id:
             return True
         else:
-            logger.warning(f"Unauthorized access attempt from: {username or 'Unknown'} (ID: {user_id})")
+            logger.warning(f"Unauthorized access attempt from chat ID: {chat_id}")
             return False
     
     def authorized_only(self, func):
         """
-        Decorator to restrict commands to authorized users only.
+        Decorator to restrict commands to authorized chat only.
         """
         @wraps(func)
         def wrapper(message: Message):
-            if not self._is_authorized(message.from_user.id, message.from_user.username):
-                self.bot.reply_to(message, "⛔ You are not authorized to use this bot.")
+            if not self._is_authorized(message.chat.id):
+                self.bot.reply_to(message, "⛔ This bot is only available in the authorized group.")
                 return
             return func(message)
         return wrapper
@@ -248,15 +246,15 @@ class TelegramBot:
 
     def send_notification(self, text: str, parse_mode: str = "HTML") -> None:
         """
-        Send a notification message to the configured chat ID.
+        Send a notification message to the authorized chat.
         Automatically splits messages that exceed Telegram's 4096 character limit.
         Used for scheduled notifications (new albums, anniversaries).
         
         :param text: The message content.
         :param parse_mode: HTML or Markdown.
         """
-        if not self.notification_chat_id:
-            logger.error("Notification chat ID not configured.")
+        if not self.authorized_chat_id:
+            logger.error("Authorized chat ID not configured.")
             return
 
         # Telegram's message limit is 4096 characters
@@ -266,7 +264,7 @@ class TelegramBot:
         for msg in messages:
             try:
                 self.bot.send_message(
-                    chat_id=self.notification_chat_id,
+                    chat_id=self.authorized_chat_id,
                     text=msg,
                     parse_mode=parse_mode
                 )

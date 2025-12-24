@@ -17,7 +17,7 @@ Chat with your bot to explore your library:
 - `/help` - Display available commands
 
 ### Key Technical Features
-- **User Authorization**: Whitelist-based access control - only authorized Telegram users can interact with the bot
+- **Group Authorization**: Bot only responds to commands from the authorized group chat - no individual user management needed
 - **Incremental Sync**: Efficiently caches your library and only fetches new metadata, reducing API load
 - **Rich Formatting**: Beautiful messages with emojis, years, and multiple genres
 - **Cover Art**: Album covers sent with random suggestions
@@ -35,15 +35,16 @@ Create a `secrets/` directory in the project root with these files (plain text, 
 | `navidrome_user.txt` | Your Navidrome username | `admin` |
 | `navidrome_password.txt` | Your Navidrome password | `mypassword` |
 | `telegram_bot_token.txt` | Token from [@BotFather](https://t.me/botfather) | `123456789:ABCdef...` |
-| `telegram_chat_id.txt` | Chat ID for scheduled notifications | `-1001234567890` |
-| `telegram_user_ids.txt` | **NEW** Comma-separated authorized user IDs | `15803276,123456789` |
+| `telegram_chat_id.txt` | **Group chat ID** for notifications and authorization | `-1001234567890` |
 
-**How to get your Telegram User ID:**
-1. Start a chat with [@userinfobot](https://t.me/userinfobot) on Telegram
-2. It will reply with your user ID
-3. Add it to `telegram_user_ids.txt`
+**How to get your Group Chat ID:**
+1. Add your bot to your Telegram group
+2. Send any message in the group
+3. Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
+4. Look for `"chat":{"id":-1001234567890` in the response
+5. Copy the negative number (including the minus sign) to `telegram_chat_id.txt`
 
-Alternatively, message your bot once - it will log unauthorized attempts with your ID in the logs.
+**Security Note**: The bot will **only respond to commands from this specific group**. Anyone outside the group cannot interact with the bot, even if they have the bot's username.
 
 ### 2. Environment Variables
 Configure in `docker-compose.yml`:
@@ -69,7 +70,7 @@ The bot will:
 docker logs -f navidrome_telegram_bot
 
 # You should see:
-# Loaded N authorized user IDs
+# Bot authorized for chat ID: -1001234567890
 # Scheduler thread started
 # Bot polling thread started
 ```
@@ -134,10 +135,10 @@ docker-compose up -d
 
 ## 🔒 Security
 
-- **User Whitelist**: Only Telegram users in `telegram_user_ids.txt` can use interactive commands
+- **Group Authorization**: Bot only responds to commands sent in the authorized group chat
 - **Docker Secrets**: Credentials never hardcoded, mounted securely at runtime
-- **No External Access**: Bot only responds to authorized users
-- **Logging**: Unauthorized access attempts are logged with username and ID
+- **No Public Access**: Anyone outside the group cannot use the bot
+- **Logging**: Unauthorized access attempts are logged with chat ID
 
 ## 📊 Rich Message Formatting
 
@@ -165,12 +166,13 @@ docker-compose up -d
 ## 🐛 Troubleshooting
 
 **Bot doesn't respond to commands:**
-- Check your user ID is in `telegram_user_ids.txt`
+- Ensure the bot is added to your authorized group
+- Verify `telegram_chat_id.txt` has the correct group chat ID (should be negative number)
 - Restart container: `docker-compose restart`
 - Check logs: `docker logs navidrome_telegram_bot`
 
 **No scheduled notifications:**
-- Verify `telegram_chat_id.txt` has correct chat ID
+- Verify `telegram_chat_id.txt` has correct group chat ID
 - Check `SCHEDULE_TIME` is in future (24h format)
 - View logs for "Daily check completed" messages
 
