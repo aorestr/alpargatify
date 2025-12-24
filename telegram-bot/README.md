@@ -1,54 +1,180 @@
 # Navidrome Telegram Bot
 
-A lightweight, optimized Telegram bot that integrates with your Navidrome (Subsonic) music server to deliver daily notifications about:
-- **🆕 New Albums**: Albums added to your library in the last 24 hours.
-- **🎂 Anniversaries**: Albums released on this day in history.
+A lightweight, feature-rich Telegram bot that integrates with your Navidrome (Subsonic) music server to deliver both **scheduled notifications** and **interactive commands**.
 
-## Key Features
+## 🎵 Features
 
-- **Incremental Synchronization**: Efficiently caches your library and only fetches detailed metadata for new albums, drastically reducing API load and execution time.
-- **Rich Notifications**: Sends beautifully formatted messages with album artist, year, and genre tags.
-- **Smart Date Parsing**: correctly handles various date formats from Navidrome/Subsonic API to ensure accurate anniversary detection.
-- **Dockerized**: Easy to deploy with Docker Compose and Docker Secrets for security.
+### Scheduled Notifications
+Automatic daily updates about your music library:
+- **🆕 New Albums**: Albums added to your library in the last 24 hours
+- **🎂 Anniversaries**: Albums released on this day in music history
 
-## Setup & Deployment
+### Interactive Commands
+Chat with your bot to explore your library:
+- `/search <query>` - Search for albums by artist or title (up to 50 results)
+- `/random` - Get a random album suggestion with cover art
+- `/stats` - View library statistics (albums, artists, songs)
+- `/help` - Display available commands
+
+### Key Technical Features
+- **User Authorization**: Whitelist-based access control - only authorized Telegram users can interact with the bot
+- **Incremental Sync**: Efficiently caches your library and only fetches new metadata, reducing API load
+- **Rich Formatting**: Beautiful messages with emojis, years, and multiple genres
+- **Cover Art**: Album covers sent with random suggestions
+- **Alpine-Based**: Optimized Docker image (~105MB) using multi-stage builds
+- **Concurrent Architecture**: Runs scheduled jobs and interactive polling simultaneously using a unified bot instance
+
+## 📋 Setup & Deployment
 
 ### 1. Secrets Configuration
-Create a `secrets/` directory in the project root and add the following files (no extensions):
+Create a `secrets/` directory in the project root with these files (plain text, no file extensions):
 
-| File Name | Content |
-|-----------|---------|
-| `navidrome_url` | Your Navidrome server URL (e.g., `https://music.example.com`) |
-| `navidrome_user` | Your Navidrome username |
-| `navidrome_password` | Your Navidrome password (or hex-encoded password + salt if using legacy auth, but plain password works with modern clients) |
-| `telegram_bot_token` | The token obtained from @BotFather |
-| `telegram_chat_id` | The Chat ID where messages should be sent |
+| File | Content | Example |
+|------|---------|---------|
+| `navidrome_url.txt` | Your Navidrome server URL | `https://music.example.com` |
+| `navidrome_user.txt` | Your Navidrome username | `admin` |
+| `navidrome_password.txt` | Your Navidrome password | `mypassword` |
+| `telegram_bot_token.txt` | Token from [@BotFather](https://t.me/botfather) | `123456789:ABCdef...` |
+| `telegram_chat_id.txt` | Chat ID for scheduled notifications | `-1001234567890` |
+| `telegram_user_ids.txt` | **NEW** Comma-separated authorized user IDs | `15803276,123456789` |
+
+**How to get your Telegram User ID:**
+1. Start a chat with [@userinfobot](https://t.me/userinfobot) on Telegram
+2. It will reply with your user ID
+3. Add it to `telegram_user_ids.txt`
+
+Alternatively, message your bot once - it will log unauthorized attempts with your ID in the logs.
 
 ### 2. Environment Variables
-You can configure the following in `docker-compose.yml`:
+Configure in `docker-compose.yml`:
 
-- `LOGGING`: Logging level (e.g., `INFO`, `DEBUG`). Default: `INFO`.
-- `SCHEDULE_TIME`: Time to run the daily check (24h format, HH:MM). Default: `08:00`.
-- `RUN_ON_STARTUP`: Set to `true` to run the check immediately when the container starts (useful for testing).
+- `LOGGING`: Log level (`INFO`, `DEBUG`). Default: `INFO`
+- `SCHEDULE_TIME`: Daily notification time (24h HH:MM). Default: `08:00`
+- `RUN_ON_STARTUP`: Run checks on startup (`true`/`false`). Default: `false`
+- `TZ`: Timezone for scheduling. Default: `Europe/Madrid`
 
-### 3. Run with Docker Compose
+### 3. Deploy with Docker Compose
 ```bash
 docker-compose up -d
 ```
-The bot will start and schedule the daily job. The `data/` directory is mounted as a volume to persist the album cache, ensuring subsequent runs are fast.
 
-## Development
+The bot will:
+1. Start both the scheduler thread (for daily notifications) and polling thread (for interactive commands)
+2. Cache your library in `data/albums_cache.json` for fast subsequent runs
+3. Listen for commands from authorized users only
+
+### 4. Verify It's Running
+```bash
+# Check logs
+docker logs -f navidrome_telegram_bot
+
+# You should see:
+# Loaded N authorized user IDs
+# Scheduler thread started
+# Bot polling thread started
+```
+
+### 5. Test Interactive Commands
+Send a message to your bot on Telegram:
+- `/help` - See all available commands
+- `/stats` - View your library stats
+- `/random` - Get a random album
+
+## 🏗️ Architecture
+
+### Unified Bot Design
+The application uses a **single `TelegramBot` class** that handles:
+- **Scheduled Notifications**: Sends daily updates about new albums and anniversaries
+- **Interactive Commands**: Responds to user queries in real-time
+- Uses `pyTelegramBotAPI` for all Telegram communication
+
+### Concurrent Threading
+Two daemon threads run simultaneously:
+1. **Scheduler Thread**: Runs daily checks at `SCHEDULE_TIME`
+2. **Bot Polling Thread**: Listens for user commands via long-polling
+
+Both share the same bot instance for efficiency.
+
+### Docker Optimization
+- **Multi-stage Alpine build** reduces image size from 235MB → 105MB (~55% reduction)
+- Separates build dependencies (gcc, musl-dev) from runtime
+- Only includes essential packages in final image
+
+## 🛠️ Development
 
 ### Project Structure
-- `src/`: Source code (`main.py`, `navidrome_client.py`, `telegram_sender.py`).
-- `tests/`: Test scripts (`test_navidrome.py`).
-- `data/`: Local cache storage (in container).
+```
+telegram-bot/
+├── src/
+│   ├── main.py              # Entry point, threading orchestration
+│   ├── telegram_bot.py      # Unified bot (commands + notifications)
+│   ├── navidrome_client.py  # Subsonic API client
+│   └── secrets_loader.py    # Docker secrets helper
+├── tests/
+│   └── test_navidrome.py    # Integration tests
+├── secrets/                 # Sensitive configuration
+└── data/                    # Persistent cache (volume)
+```
 
 ### Running Tests
-To verify connectivity and logic without sending real messages to the schedule:
-
 ```bash
-# Run the test script inside the container
 docker-compose run --rm telegram-bot python tests/test_navidrome.py
 ```
-This script acts as a "speed test" and "functional test", verifying the incremental sync performance and the anniversary detection logic. 
+
+### Updating the Bot
+```bash
+# Pull latest changes
+git pull
+
+# Rebuild and restart
+docker-compose down
+docker-compose build
+docker-compose up -d
+```
+
+## 🔒 Security
+
+- **User Whitelist**: Only Telegram users in `telegram_user_ids.txt` can use interactive commands
+- **Docker Secrets**: Credentials never hardcoded, mounted securely at runtime
+- **No External Access**: Bot only responds to authorized users
+- **Logging**: Unauthorized access attempts are logged with username and ID
+
+## 📊 Rich Message Formatting
+
+**Search Results:**
+```
+🔎 Results for 'pink floyd':
+
+• Pink Floyd - The Dark Side of the Moon 📅 1973 🏷 Progressive Rock
+• Pink Floyd - Wish You Were Here 📅 1975 🏷 Progressive Rock
+• Pink Floyd - The Wall 📅 1979 🏷 Rock, Progressive Rock
+```
+
+**Random Album:**
+```
+🎲 Why not listen to this?
+
+💿 Kind of Blue
+👤 Miles Davis
+📅 1959
+🏷 Jazz, Cool Jazz
+
+[Album cover image]
+```
+
+## 🐛 Troubleshooting
+
+**Bot doesn't respond to commands:**
+- Check your user ID is in `telegram_user_ids.txt`
+- Restart container: `docker-compose restart`
+- Check logs: `docker logs navidrome_telegram_bot`
+
+**No scheduled notifications:**
+- Verify `telegram_chat_id.txt` has correct chat ID
+- Check `SCHEDULE_TIME` is in future (24h format)
+- View logs for "Daily check completed" messages
+
+**Cover art not loading:**
+- Verify Navidrome is accessible from the bot container
+- Check credentials in secrets files
+- Try `/random` command and check logs for errors
