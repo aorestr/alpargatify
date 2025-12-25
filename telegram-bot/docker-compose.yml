@@ -9,7 +9,7 @@ services:
       - LOGGING=INFO # Options: INFO, DEBUG
       - RUN_ON_STARTUP=false # Set to true for testing
       - NAVIDROME_API_VERSION=1.16.1
-      - NAVIDROME_MUSIC_FOLDER='Music Library'
+      - NAVIDROME_MUSIC_FOLDER=Music Library
     volumes:
       - ./data:/app/data
     secrets:

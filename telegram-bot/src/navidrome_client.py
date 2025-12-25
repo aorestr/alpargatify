@@ -439,12 +439,18 @@ class NavidromeClient:
         :param limit: Maximum number of albums to return.
         :return: List of matching album dictionaries.
         """
-        response = self._request('search3', {
+        params = {
             'query': query,
             'albumCount': limit,
             'artistCount': 0,
             'songCount': 0
-        })
+        }
+        
+        folder_id = self.get_music_folder_id()
+        if folder_id:
+            params['musicFolderId'] = folder_id
+
+        response = self._request('search3', params)
         
         if response and 'searchResult3' in response:
             albums = response['searchResult3'].get('album', [])

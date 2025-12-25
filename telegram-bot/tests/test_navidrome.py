@@ -6,7 +6,10 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from navidrome_client import NavidromeClient
-from telegram_sender import TelegramSender
+from telegram_bot import TelegramBot
+
+
+SPEED_TEST: bool = False
 
 # Configure basic logging to stdout
 logging.basicConfig(
@@ -20,7 +23,7 @@ def test():
     logger.info("--- Starting Navidrome Connection Test ---")
     
     client = NavidromeClient()
-    sender = TelegramSender()
+    bot = TelegramBot()
     
     # Check 1: New Albums
     logger.info("1. Testing get_new_albums(hours=2400) (Checking last 100 days to ensure results)...")
@@ -31,8 +34,8 @@ def test():
         if new_albums:
             logger.info(f"SUCCESS: Found {len(new_albums)} albums.")
             
-            # Visual check relative to Sender
-            msg = sender.format_album_list(new_albums[:3], "Test Message Preview")
+            # Visual check relative to Bot
+            msg = bot.format_album_list(new_albums[:3], "Test Message Preview")
             logger.info(f"--- PREVIEW MESSAGE ---\n{msg}\n-----------------------")
             
         else:
@@ -53,37 +56,40 @@ def test():
             logger.info(f"SUCCESS: Found {len(anniversaries)} anniversaries.")
             
             # Check visual format for genres
-            msg = sender.format_album_list(anniversaries[:3], "Anniversary Preview")
+            msg = bot.format_album_list(anniversaries[:3], "Anniversary Preview")
             logger.info(f"--- PREVIEW MESSAGE ---\n{msg}\n-----------------------")
             
         else:
             logger.info("FAILURE? Connection worked, but no anniversaries found for Sept 22.")
     except Exception as e:
         logger.error(f"FAILURE: get_anniversary_albums failed: {e}", exc_info=True)
+
+    # Speed test (must be activated)
+    if SPEED_TEST:
+
+        # Speed Test
+        import time
         
-    # Speed Test
-    import time
-    
-    logger.info("--- Speed Test: Force Sync (Full Enrichment) ---")
-    start = time.time()
-    # force=True means it will re-fetch details for ALL albums
-    client.sync_library(force=True)
-    duration_force = time.time() - start
-    logger.info(f"Force Sync took {duration_force:.2f} seconds.")
-    
-    logger.info("--- Speed Test: Incremental Sync (Should be fast) ---")
-    start = time.time()
-    # force=False should trigger incremental logic (only fetching new IDs, which should be 0)
-    client.sync_library(force=False)
-    duration_inc = time.time() - start
-    logger.info(f"Incremental Sync took {duration_inc:.2f} seconds.")
-    
-    if duration_inc < duration_force / 2:
-        logger.info("SUCCESS: Incremental sync is significantly faster.")
-    else:
-        logger.warning(f"WARNING: Incremental sync ({duration_inc:.2f}s) was not significantly faster than Force ({duration_force:.2f}s). Cache might be ignored or overhead is high.")
+        logger.info("--- Speed Test: Force Sync (Full Enrichment) ---")
+        start = time.time()
+        # force=True means it will re-fetch details for ALL albums
+        client.sync_library(force=True)
+        duration_force = time.time() - start
+        logger.info(f"Force Sync took {duration_force:.2f} seconds.")
         
-    logger.info("--- Test Completed ---")
+        logger.info("--- Speed Test: Incremental Sync (Should be fast) ---")
+        start = time.time()
+        # force=False should trigger incremental logic (only fetching new IDs, which should be 0)
+        client.sync_library(force=False)
+        duration_inc = time.time() - start
+        logger.info(f"Incremental Sync took {duration_inc:.2f} seconds.")
+        
+        if duration_inc < duration_force / 2:
+            logger.info("SUCCESS: Incremental sync is significantly faster.")
+        else:
+            logger.warning(f"WARNING: Incremental sync ({duration_inc:.2f}s) was not significantly faster than Force ({duration_force:.2f}s). Cache might be ignored or overhead is high.")
+            
+        logger.info("--- Test Completed ---")
 
 if __name__ == "__main__":
     test()
